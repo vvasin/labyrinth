@@ -114,13 +114,24 @@ export class App {
   // --- state machine ------------------------------------------------------
   _enterPreview() {
     this.state = 'p';
-    const mz = this.maze;
-    this.camX = mz.m / 2;
-    this.camY = (Math.max(mz.n, mz.m) / 2 + 1) / Math.tan((FOVY * Math.PI) / 360);
-    this.camZ = mz.n / 2;
     this.pitch = -90;
     this.yaw = 0;
     this.cheat = false;
+    this._framePreview();
+  }
+
+  // Place the top-down preview camera so the whole maze fits the viewport,
+  // accounting for the (often portrait) aspect: the vertical FOV frames the
+  // maze depth (n), the horizontal FOV (= vertical · aspect) frames its width
+  // (m), and we take whichever height satisfies both. The +1 pads a half-cell
+  // border; the −0.7 cancels the projection's forward shove.
+  _framePreview() {
+    const mz = this.maze;
+    const aspect = this.canvas.width / this.canvas.height || 1;
+    const t = Math.tan((FOVY * Math.PI) / 360);
+    this.camX = mz.m / 2;
+    this.camZ = mz.n / 2;
+    this.camY = Math.max((mz.n / 2 + 1) / t, (mz.m / 2 + 1) / (t * aspect)) - 0.7;
   }
 
   startGame() {
@@ -151,6 +162,7 @@ export class App {
   }
 
   look(dx, dy) {
+    if (this.state !== 'g') return; // no free-look on the preview/transition screens
     this.pitch = Math.max(-90, Math.min(90, this.pitch + dy * LOOK_SPEED));
     this.yaw -= dx * LOOK_SPEED;
   }
@@ -271,8 +283,10 @@ export class App {
     this._update(dt);
 
     const r = this.r, gl = r.gl, mz = this.maze;
+    if (this.state === 'p') this._framePreview(); // re-fit to the live aspect each frame
     const aspect = this.canvas.width / this.canvas.height || 1;
-    let proj = M.perspective(FOVY, aspect, 0.1, mz.n + mz.m);
+    const far = Math.max(mz.n + mz.m, this.camY + 2);
+    let proj = M.perspective(FOVY, aspect, 0.1, far);
     proj = M.translate(proj, 0, 0, -0.7);
     this._proj = proj;
     this._view = this._viewMatrix();
