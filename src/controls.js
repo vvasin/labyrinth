@@ -37,7 +37,8 @@ export function bindControls(app, dom) {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerId !== dragId) return;
-    app.look(e.clientX - lx, -(e.clientY - ly));
+    // Swipe right → turn right (see the right side), swipe up → look up.
+    app.look(-(e.clientX - lx), -(e.clientY - ly));
     lx = e.clientX; ly = e.clientY;
   });
   const endDrag = (e) => { if (e.pointerId === dragId) dragId = null; };

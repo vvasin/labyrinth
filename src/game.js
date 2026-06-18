@@ -14,7 +14,7 @@ import {
 } from './scene.js';
 import { loadSettings, saveSettings } from './persistence.js';
 
-const FOVY = 55, RADIUS = 0.24, FOG_START = 1, FOG_END = 3;
+const FOVY = 65, RADIUS = 0.24, FOG_START = 1, FOG_END = 3;
 const SPOT_CUTOFF = Math.cos((35 * Math.PI) / 180), SPOT_EXP = 40, SPOT_ATTEN = 0.2;
 const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
 // First-person avatar: scale puts the head just below eye level; EYE_FWD shoves
