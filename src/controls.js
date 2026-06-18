@@ -51,7 +51,7 @@ export function bindControls(app, dom) {
     const len = Math.hypot(dx, dy);
     if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
     nub.style.transform = `translate(${dx}px, ${dy}px)`;
-    app.input.jx = -dx / R; // screen-right → strafe right (negative str)
+    app.input.jx = dx / R;  // screen-right (dx>0) → strafe right (negative str)
     app.input.jy = dy / R;  // screen-up (dy<0) → forward
   };
   joy.addEventListener('pointerdown', (e) => {

@@ -17,11 +17,19 @@ import { loadSettings, saveSettings } from './persistence.js';
 const FOVY = 55, RADIUS = 0.24, FOG_START = 1, FOG_END = 3;
 const SPOT_CUTOFF = Math.cos((35 * Math.PI) / 180), SPOT_EXP = 40, SPOT_ATTEN = 0.2;
 const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
+// First-person avatar: scale puts the head just below eye level; EYE_FWD shoves
+// the eye ahead of the head so the body never blocks the forward view; BOB_AMP
+// is the walk-driven head bob applied to the camera.
+const AVATAR_SCALE = 0.23, EYE_FWD = 0.15, BOB_AMP = 0.02;
 
 const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
 const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.45, spec: [0.9, 0.9, 0.9], shininess: 60 };
-const START_MAT = { base: [0.85, 0.3, 0.3], emission: [0.5, 0.12, 0.12], unlit: true, alpha: 0.85 };
-const END_MAT = { base: [0.3, 0.85, 0.3], emission: [0.12, 0.5, 0.12], unlit: true, alpha: 0.85 };
+// The markers carry emission so they still glow, but are lit (not `unlit`) so
+// they pass through fog and depth like real geometry — otherwise the unlit
+// branch in the shader skips fog and the exit shows through distant walls that
+// (being beyond fog range) were never drawn to occlude it.
+const START_MAT = { base: [0.85, 0.3, 0.3], emission: [0.55, 0.14, 0.14], alpha: 0.85 };
+const END_MAT = { base: [0.3, 0.85, 0.3], emission: [0.14, 0.55, 0.14], alpha: 0.85 };
 
 export class App {
   constructor(canvas) {
@@ -43,6 +51,8 @@ export class App {
     this.cheat = false;
     this.walkPhase = 0;
     this.animT = 0;
+    this.bob = 0;        // current camera head-bob offset (eased)
+    this.moving = false; // did the player move this frame
 
     this.maze.generate(s.N, s.M, s.p, s.q);
     this._rebuild();
@@ -146,6 +156,7 @@ export class App {
   }
 
   _move(dt) {
+    this.moving = false;
     if (this.state !== 'g') return;
     const i = this.input;
     let fwd = (i.f ? 1 : 0) - (i.b ? 1 : 0) - i.jy;
@@ -158,7 +169,9 @@ export class App {
     this.camX += step * fwd * Math.sin(ya) - step * str * Math.cos(ya);
     this.camZ += -step * fwd * Math.cos(ya) - step * str * Math.sin(ya);
     this._parseMove();
-    this.walkPhase += Math.hypot(this.camX - px, this.camZ - pz) * 9;
+    const moved = Math.hypot(this.camX - px, this.camZ - pz);
+    this.walkPhase += moved * 9;
+    this.moving = moved > 1e-5;
   }
 
   // --- per-frame update + lighting ---------------------------------------
@@ -171,6 +184,10 @@ export class App {
       if (this.animT >= 1) this._enterPreview();
     }
     this._move(dt);
+    // Head bob: the camera rides the avatar's gait while walking and eases back
+    // to rest when stopped, so the eye stays "attached" to the head.
+    const target = this.moving ? Math.abs(Math.sin(this.walkPhase)) * BOB_AMP : 0;
+    this.bob += (target - this.bob) * Math.min(1, dt * 12);
   }
 
   _lighting() {
@@ -199,12 +216,12 @@ export class App {
   _viewMatrix() {
     let v = M.rotateX(M.identity(), -this.pitch);
     v = M.rotateY(v, this.yaw);
-    v = M.translate(v, -this.camX, -this.camY, -this.camZ);
+    v = M.translate(v, -this.camX, -(this.camY + this.bob), -this.camZ);
     return v;
   }
 
   // --- rendering ----------------------------------------------------------
-  _drawScene(model, clips, depth) {
+  _drawScene(model, clips, _depth) {
     const r = this.r, proj = this._proj, view = this._view;
     r.setClipPlanes(clips);
 
@@ -213,13 +230,19 @@ export class App {
     r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
     r.drawMesh(this.floorMesh);
 
-    // mech — drawn only in reflections (depth > 0): like most FPS games we hide
-    // the avatar in the direct view, but you see yourself in the mirror walls.
-    if (depth > 0 && (this.state === 's' || this.state === 'g' || this.state === 'f')) {
+    // mech — the player's own body, drawn at every level so it shows both in the
+    // direct first-person view and reflected in the mirror walls. The body is
+    // anchored EYE_FWD behind the camera (so the head never blocks the forward
+    // view) and scaled so the head sits just below the eye; the torso, arms and
+    // legs swing into frame when you look down.
+    if (this.state === 's' || this.state === 'g' || this.state === 'f') {
+      const ya = (this.yaw * Math.PI) / 180;
+      const bx = this.camX - EYE_FWD * Math.sin(ya);
+      const bz = this.camZ + EYE_FWD * Math.cos(ya);
       r.enableCull(false);
-      let base = M.translate(M.identity(), this.camX, 0, this.camZ);
+      let base = M.translate(M.identity(), bx, 0, bz);
       base = M.rotateY(base, 180 - this.yaw);
-      base = M.scale(base, 0.32, 0.32, 0.32);
+      base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
       this.mech.draw(r, proj, view, model, base, clips, this.walkPhase);
       r.enableCull(true);
     }
