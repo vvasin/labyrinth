@@ -17,10 +17,12 @@ import { loadSettings, saveSettings } from './persistence.js';
 const FOVY = 65, RADIUS = 0.24, FOG_START = 1, FOG_END = 3;
 const SPOT_CUTOFF = Math.cos((35 * Math.PI) / 180), SPOT_EXP = 40, SPOT_ATTEN = 0.2;
 const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
-// First-person avatar: scale puts the head just below eye level; EYE_FWD shoves
-// the eye ahead of the head so the body never blocks the forward view; BOB_AMP
-// is the walk-driven head bob applied to the camera.
-const AVATAR_SCALE = 0.23, EYE_FWD = 0.15, BOB_AMP = 0.02;
+// First-person avatar: camX/camZ is the actor's body centre — the vertical yaw
+// axis and the collision point. The eye sits EYE_FWD in front of that axis (at
+// the actor's "eyes"), so the body never blocks the forward view yet stays
+// right behind the camera. AVATAR_SCALE puts the head just below eye level;
+// BOB_AMP is the walk-driven head bob applied to the eye.
+const AVATAR_SCALE = 0.23, EYE_FWD = 0.1, BOB_AMP = 0.02;
 
 const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
 const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.45, spec: [0.9, 0.9, 0.9], shininess: 60 };
@@ -226,9 +228,15 @@ export class App {
   }
 
   _viewMatrix() {
+    // Yaw turns about the actor's body axis (camX,camZ); the eye is EYE_FWD in
+    // front of it, so the camera arcs around the body as it turns instead of the
+    // body swinging behind a self-pivoting camera. Bob rides the eye vertically.
+    const ya = (this.yaw * Math.PI) / 180;
+    const ex = this.camX + EYE_FWD * Math.sin(ya);
+    const ez = this.camZ - EYE_FWD * Math.cos(ya);
     let v = M.rotateX(M.identity(), -this.pitch);
     v = M.rotateY(v, this.yaw);
-    v = M.translate(v, -this.camX, -(this.camY + this.bob), -this.camZ);
+    v = M.translate(v, -ex, -(this.camY + this.bob), -ez);
     return v;
   }
 
@@ -243,16 +251,13 @@ export class App {
     r.drawMesh(this.floorMesh);
 
     // mech — the player's own body, drawn at every level so it shows both in the
-    // direct first-person view and reflected in the mirror walls. The body is
-    // anchored EYE_FWD behind the camera (so the head never blocks the forward
-    // view) and scaled so the head sits just below the eye; the torso, arms and
+    // direct first-person view and reflected in the mirror walls. It stands on
+    // its body axis (camX,camZ) and rotates in place about it; the eye sits just
+    // in front, so the head stays out of the forward view but the torso, arms and
     // legs swing into frame when you look down.
     if (this.state === 's' || this.state === 'g' || this.state === 'f') {
-      const ya = (this.yaw * Math.PI) / 180;
-      const bx = this.camX - EYE_FWD * Math.sin(ya);
-      const bz = this.camZ + EYE_FWD * Math.cos(ya);
       r.enableCull(false);
-      let base = M.translate(M.identity(), bx, 0, bz);
+      let base = M.translate(M.identity(), this.camX, 0, this.camZ);
       base = M.rotateY(base, 180 - this.yaw);
       base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
       this.mech.draw(r, proj, view, model, base, clips, this.walkPhase);
