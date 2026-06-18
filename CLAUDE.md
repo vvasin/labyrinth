@@ -29,7 +29,7 @@ const a = window.__app;
 a.startGame();             // preview → first person
 a.state = 'g';             // force gameplay (skip the fog-in animation)
 a.camX = 2.5; a.camZ = 1.5; a.yaw = 120; a.pitch = -5;   // place the camera
-a.setDepth(2);             // mirror reflection depth (0–4)
+a.setDepth(2);             // reflection distance budget, in cells (0–4)
 a.regenerate();            // new maze, back to preview
 a.maze.solutionPath();     // list of cells from entrance to exit
 a._frames;                 // frame counter (cheap liveness check for tests)
@@ -78,17 +78,24 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
 
 ## The mirror renderer (`mirrors.js`) — read before touching rendering
 
-Ported from `DrawMirrors(depth, id)`. For each visible mirror wall, at each recursion level:
+Ported from `DrawMirrors(depth, id)`. Each level owns a stencil value `id`. For **every**
+facing wall (not only the reflected ones), at each recursion level:
 
-1. **Stamp** the mirror's silhouette into the stencil buffer (colour/depth masked off,
-   `INCR` on pass), marking the region its reflection will fill.
-2. **Recurse**: draw the *entire scene reflected* across that wall — via a reflection matrix
-   (`scale(-1)·translate`) accumulated into the model matrix — clipped to the wall's
-   half-space and to the stencil region. The reflection is drawn one stencil level deeper.
-3. **Overlay** the semi-transparent mirror texture (`REPLACE` resets the stencil, depth is
-   written) so the mirror reads as a real wall and occludes correctly.
+1. **Stamp** the wall's silhouette `id → id+1` (colour/depth masked off, `INCR` on pass).
+   Stamping every wall is what lets the base pass mask itself out of all wall pixels.
+2. **Recurse** (only if the wall is in line of sight, inside the portal cone, and within the
+   reflection distance budget): draw the *entire scene reflected* across that wall — via a
+   reflection matrix (`scale(-1)·translate`) accumulated into the model matrix — into the
+   `id+1` region, clipped to the wall's half-space.
+3. **Overlay** the mirror pane over the whole silhouette (`stencilFunc(LEQUAL, id+1)`,
+   `REPLACE` flattens the region back to `id+1`, depth written so it occludes like a wall).
+   Semi-transparent if it was reflected, **opaque** if not (so it reads as a solid wall, not
+   a hole onto the void).
 
-After the per-wall loop, the **un-reflected** scene is drawn at that level too.
+After the per-wall loop, the **un-reflected** scene is drawn **only where the stencil is
+still exactly `id`** — the open area no wall covers. That `EQUAL id` test is the culling
+mask: without it the base pass redraws the floor/markers on top of the mirrors and they
+z-fight. (The original did the same with fixed-function stencil masking.)
 
 Fixed-function pieces re-created by hand, because WebGL 1.0 lacks them:
 
@@ -107,16 +114,17 @@ Each level recomputes its visible walls from **that level's reflected virtual ca
 geometry; distances from it equal the true folded optical path, so one `range` bounds every
 depth). Two distinct jobs come out of that list:
 
-- **Surfaces** — *every* facing wall in range gets its textured mirror quad. This is what
+- **Surfaces** — *every* facing wall in range gets its textured mirror pane. This is what
   keeps the reflected rooms fully walled; skipping any of them is exactly the old bug where
   the floor showed through a missing mirror. Cheap (flat quads), so completeness is free.
-- **Reflections** — only a few walls are recursed into (each recursion is a whole reflected
-  sub-render, cost ~ `walls^depth`). **Depth 0 reflects every wall in line of sight** — the
-  real maze walls around you. Deeper levels keep the nearest `reflectCap` (default 3), ranked
-  by **centrality to the portal** they're seen through (`chooseReflections`), *not* by raw
-  distance: the wall straight down the tunnel — the wall behind you, seen in the mirror ahead
-  — must win the budget over near peripheral side walls, or the hall-of-mirrors collapses to
-  a flat wall.
+- **Reflections** — a wall is recursed into (each recursion is a whole reflected sub-render)
+  only when it is in **line of sight**, inside the **portal cone** it's seen through
+  (`inCone` — walls off to the side or behind the aperture are skipped), and within the
+  **reflection distance budget** `reflectDist`. The budget is a distance in cells, *not* a
+  wall count: since the virtual camera is the eye folded through the mirror chain, a wall's
+  distance from it is the true optical path, so the cutoff sits stably out in the fog.
+  A *count* cap instead flips near walls between mirror and solid as the camera moves — the
+  flicker. Recursion is also hard-capped at `MAX_CLIP` levels (the clip-plane stack depth).
 
 Two subtleties make the virtual cameras behave. The facing test in `visibleWallsFrom` is an
 **exact** half-space (no slack cell), because a virtual camera can sit inside a wall and a
@@ -124,9 +132,9 @@ loose test would pick that wall's hidden back face. And line of sight is traced 
 **portal**, not the virtual camera, since the camera sits behind the mirror it's looking
 through — tracing from there would let the portal wall occlude the whole tunnel beyond it.
 
-A wall that gets a surface but no reflection (out of budget, past max depth, or occluded) is
-drawn **opaque**, so it reads as a solid wall rather than a hole onto the void. If you raise
-`reflectCap` or the max depth, watch software-renderer / mobile perf.
+A wall that gets a surface but no reflection (beyond the distance budget, outside the cone,
+or occluded) is drawn **opaque**, so it reads as a solid wall rather than a hole onto the
+void. If you raise `reflectDist`, watch software-renderer / mobile perf.
 
 ## Coordinate & camera model (`game.js`)
 

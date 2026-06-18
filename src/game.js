@@ -306,7 +306,11 @@ export class App {
     drawMirrors({
       r, proj, view: this._view, maze: mz, range: FOG_END,
       camX: this.camX, camZ: this.camZ,
-      maxDepth: this.maxDepth, reflectCap: 3,
+      // maxDepth is interpreted as a reflection DISTANCE budget (in cells): a
+      // mirror reflects only while the wall behind it is within this many cells
+      // of optical path. A distance (not a count) keeps walls from flickering
+      // between mirror and solid as the camera moves.
+      reflectDist: this.maxDepth,
       mirrorMat: { ...MIRROR_MAT, tex: this.tex.mirror },
       mirrorOpaque: { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror },
       drawScene: (model, clips, depth) => this._drawScene(model, clips, depth),
