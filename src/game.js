@@ -124,14 +124,14 @@ export class App {
   // accounting for the (often portrait) aspect: the vertical FOV frames the
   // maze depth (n), the horizontal FOV (= vertical · aspect) frames its width
   // (m), and we take whichever height satisfies both. The +1 pads a half-cell
-  // border; the −0.7 cancels the projection's forward shove.
+  // border.
   _framePreview() {
     const mz = this.maze;
     const aspect = this.canvas.width / this.canvas.height || 1;
     const t = Math.tan((FOVY * Math.PI) / 360);
     this.camX = mz.m / 2;
     this.camZ = mz.n / 2;
-    this.camY = Math.max((mz.n / 2 + 1) / t, (mz.m / 2 + 1) / (t * aspect)) - 0.7;
+    this.camY = Math.max((mz.n / 2 + 1) / t, (mz.m / 2 + 1) / (t * aspect));
   }
 
   startGame() {
@@ -286,8 +286,10 @@ export class App {
     if (this.state === 'p') this._framePreview(); // re-fit to the live aspect each frame
     const aspect = this.canvas.width / this.canvas.height || 1;
     const far = Math.max(mz.n + mz.m, this.camY + 2);
-    let proj = M.perspective(FOVY, aspect, 0.1, far);
-    proj = M.translate(proj, 0, 0, -0.7);
+    // No projection shove: the centre of projection coincides with the rotation
+    // pivot (the eye), so the camera turns about itself and sits just in front of
+    // the head rather than behind it.
+    const proj = M.perspective(FOVY, aspect, 0.1, far);
     this._proj = proj;
     this._view = this._viewMatrix();
 
@@ -300,6 +302,7 @@ export class App {
     drawMirrors({
       r, proj, view: this._view, walls, maxDepth: this.maxDepth, reflectCap: 3,
       mirrorMat: { ...MIRROR_MAT, tex: this.tex.mirror },
+      mirrorOpaque: { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror },
       drawScene: (model, clips, depth) => this._drawScene(model, clips, depth),
     });
     mz.wall[1][0] = 1;

@@ -60,14 +60,22 @@ function recurse(ctx, depth, id, model, clips) {
   const face = (depth & 1) === 1;          // true → cull FRONT (reflected winding)
   const nextId = id + 1;
 
-  if (depth < ctx.maxDepth) {
-    // Depth 0 must draw every visible wall — the wall surfaces ARE the mirrors.
-    // Deeper reflections recurse only into the nearest few walls so the
-    // recursion (cost ~ walls^depth) can't explode.
-    const levelWalls = depth === 0 ? ctx.walls : ctx.walls.slice(0, ctx.reflectCap);
-    for (const w of levelWalls) {
-      const d = wallData(w.dir, w.i, w.j);
+  // Depth 0 must draw every visible wall — the wall surfaces ARE the mirrors.
+  // Deeper reflections only draw the nearest few walls so the recursion (cost
+  // ~ walls^depth) can't explode. The mirror SURFACES are drawn at every level
+  // up to and including maxDepth; only the reflections inside them (steps 1–2)
+  // stop once we're out of recursion budget — otherwise the deepest reflected
+  // room would show empty space where its walls should be.
+  // Recursing levels are capped tightly — each wall there spawns a whole
+  // reflected sub-render, so cost grows ~ walls^depth. The deepest level does
+  // NOT recurse; it only lays down cheap wall quads, so we can fill in more of
+  // them to avoid gaps in the reflected room.
+  const cap = depth < ctx.maxDepth ? ctx.reflectCap : ctx.reflectCap * 3;
+  const levelWalls = depth === 0 ? ctx.walls : ctx.walls.slice(0, cap);
+  for (const w of levelWalls) {
+    const d = wallData(w.dir, w.i, w.j);
 
+    if (depth < ctx.maxDepth) {
       // (1) stamp the mirror silhouette into the stencil (color/depth masked
       //     off, INCR-on-pass set by the caller).
       r.cullFace(face);
@@ -81,24 +89,29 @@ function recurse(ctx, depth, id, model, clips) {
       const childClips = clips.concat([planeEye]);
       const childModel = M.multiply(model, d.reflect);
       recurse(ctx, depth + 1, nextId, childModel, childClips);
-
-      // (3) lay the textured, semi-transparent mirror over the reflection;
-      //     REPLACE resets the stencil to `id` and depth is written so the
-      //     mirror occludes like a wall.
-      r.cullFace(face);
-      r.stencilFunc(GL.LEQUAL, id, 0xFF);
-      r.stencilOp(GL.KEEP, GL.KEEP, GL.REPLACE);
-      r.colorMask(true);
-      r.depthMask(true);
-      r.setClipPlanes(clips);
-      r.setMatrices(ctx.proj, M.multiply(ctx.view, model));
-      r.setMaterial(ctx.mirrorMat);
-      r.drawQuad(d.quad);
-
-      r.depthMask(false);
-      r.colorMask(false);
-      r.stencilOp(GL.KEEP, GL.KEEP, GL.INCR);
     }
+
+    // (3) lay the textured mirror over the reflection; REPLACE resets the
+    //     stencil to `id` and depth is written so the mirror occludes like a
+    //     wall. While there is reflection budget left the mirror is
+    //     semi-transparent (the reflection shows through); at the deepest level
+    //     there is nothing more to reflect, so we draw it OPAQUE — otherwise the
+    //     reflected room would show the black void behind the glass instead of
+    //     its walls.
+    const deepest = depth === ctx.maxDepth;
+    r.cullFace(face);
+    r.stencilFunc(GL.LEQUAL, id, 0xFF);
+    r.stencilOp(GL.KEEP, GL.KEEP, GL.REPLACE);
+    r.colorMask(true);
+    r.depthMask(true);
+    r.setClipPlanes(clips);
+    r.setMatrices(ctx.proj, M.multiply(ctx.view, model));
+    r.setMaterial(deepest ? (ctx.mirrorOpaque || ctx.mirrorMat) : ctx.mirrorMat);
+    r.drawQuad(d.quad);
+
+    r.depthMask(false);
+    r.colorMask(false);
+    r.stencilOp(GL.KEEP, GL.KEEP, GL.INCR);
   }
 
   // un-reflected scene at this level, in the stencil region <= id.
