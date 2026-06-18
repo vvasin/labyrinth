@@ -64,18 +64,65 @@ export function buildBoundary(maze) {
 
 const DIST = (x, y) => Math.hypot(x, y);
 
-// Camera-facing mirror faces within fog range, sorted nearest-first.
-export function visibleWalls(maze, camX, camZ, fe) {
-  const n = maze.n, m = maze.m, w = maze.wall, walls = [];
-  const add = (i, j, dir, dist) => walls.push({ i, j, dir, dist });
+// Grid line-of-sight: true if the straight segment from (x0,z0) to (x1,z1)
+// crosses no solid cell strictly between its endpoints (an Amanatides–Woo
+// traversal). The endpoint cells are not tested — the start is the viewer's own
+// cell and the end is an open cell adjacent to the mirror face — so what's left
+// is "is anything walling this face off from the viewer".
+function lineOfSight(w, x0, z0, x1, z1) {
+  let cx = Math.floor(x0), cz = Math.floor(z0);
+  const ex = Math.floor(x1), ez = Math.floor(z1);
+  const dx = x1 - x0, dz = z1 - z0;
+  const sx = Math.sign(dx), sz = Math.sign(dz);
+  const tdx = dx !== 0 ? Math.abs(1 / dx) : Infinity;
+  const tdz = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+  let tmx = dx !== 0 ? (sx > 0 ? cx + 1 - x0 : x0 - cx) * tdx : Infinity;
+  let tmz = dz !== 0 ? (sz > 0 ? cz + 1 - z0 : z0 - cz) * tdz : Infinity;
+  // Guard against pathological inputs (a virtual camera that lands far outside
+  // the grid) by bounding the steps to the worst-case Manhattan span.
+  let guard = Math.abs(ex - cx) + Math.abs(ez - cz) + 1;
+  while ((cx !== ex || cz !== ez) && guard-- > 0) {
+    if (tmx < tmz) { cx += sx; tmx += tdx; } else { cz += sz; tmz += tdz; }
+    if (cx === ex && cz === ez) break;
+    if (w[cz] && w[cz][cx]) return false;
+  }
+  return true;
+}
 
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < m; j++) {
-      if (!(DIST(camX - j - 0.5, camZ - i - 0.5) < fe + 1 && w[i][j])) continue;
-      if (j > 0 && !w[i][j - 1] && camX < j + 1) add(i, j, WALL_LEFT, DIST(camX - j, camZ - i - 0.5));
-      if (j < m - 1 && !w[i][j + 1] && camX > j) add(i, j, WALL_RIGHT, DIST(camX - j - 1, camZ - i - 0.5));
-      if (i > 0 && !w[i - 1][j] && camZ < i + 1) add(i, j, WALL_UP, DIST(camX - j - 0.5, camZ - i));
-      if (i < n - 1 && !w[i + 1][j] && camZ > i) add(i, j, WALL_DOWN, DIST(camX - j - 0.5, camZ - i - 1));
+// Camera-facing mirror faces within optical range, sorted nearest-first.
+//
+// Each wall carries `los` — whether it has clear line of sight from the
+// viewpoint. The mirror recursion draws every wall here as a surface (so the
+// floor never shows through a missing wall) but only spends reflection budget
+// on the `los` ones, since a mirror you can't see isn't worth recursing into.
+//
+// This is called for the real camera AND for the reflected "virtual" cameras of
+// each recursion level. Because a virtual camera is just the real eye reflected
+// through the mirror chain (reflections are distance-preserving), a wall's
+// distance from it equals the true folded optical path from the eye — so the
+// same fog range bounds every level, and deep reflections naturally see less.
+// The scan is clamped to a window around the viewpoint so its cost is O(range²),
+// independent of maze size (and empty once the virtual camera drifts off-grid).
+export function visibleWallsFrom(maze, camX, camZ, range) {
+  const n = maze.n, m = maze.m, w = maze.wall, walls = [];
+  const add = (i, j, dir, dist, tx, tz) =>
+    walls.push({ i, j, dir, dist, los: lineOfSight(w, camX, camZ, tx, tz) });
+
+  const i0 = Math.max(0, Math.floor(camZ - range - 1));
+  const i1 = Math.min(n - 1, Math.ceil(camZ + range + 1));
+  const j0 = Math.max(0, Math.floor(camX - range - 1));
+  const j1 = Math.min(m - 1, Math.ceil(camX + range + 1));
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      if (!(DIST(camX - j - 0.5, camZ - i - 0.5) < range + 1 && w[i][j])) continue;
+      if (j > 0 && !w[i][j - 1] && camX < j + 1)
+        add(i, j, WALL_LEFT, DIST(camX - j, camZ - i - 0.5), j - 0.5, i + 0.5);
+      if (j < m - 1 && !w[i][j + 1] && camX > j)
+        add(i, j, WALL_RIGHT, DIST(camX - j - 1, camZ - i - 0.5), j + 1.5, i + 0.5);
+      if (i > 0 && !w[i - 1][j] && camZ < i + 1)
+        add(i, j, WALL_UP, DIST(camX - j - 0.5, camZ - i), j + 0.5, i - 0.5);
+      if (i < n - 1 && !w[i + 1][j] && camZ > i)
+        add(i, j, WALL_DOWN, DIST(camX - j - 0.5, camZ - i - 1), j + 0.5, i + 1.5);
     }
   }
   walls.sort((a, b) => a.dist - b.dist);

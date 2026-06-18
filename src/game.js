@@ -10,7 +10,7 @@ import { Mech } from './mech.js';
 import { drawMirrors } from './mirrors.js';
 import {
   buildFloor, buildStartWall, buildEndWall, buildBoundary,
-  buildPathLine, visibleWalls,
+  buildPathLine,
 } from './scene.js';
 import { loadSettings, saveSettings } from './persistence.js';
 
@@ -303,9 +303,10 @@ export class App {
     r.setLighting(this._lighting());
 
     mz.wall[1][0] = 0; // entrance open during the render pass
-    const walls = visibleWalls(mz, this.camX, this.camZ, FOG_END);
     drawMirrors({
-      r, proj, view: this._view, walls, maxDepth: this.maxDepth, reflectCap: 3,
+      r, proj, view: this._view, maze: mz, range: FOG_END,
+      camX: this.camX, camZ: this.camZ,
+      maxDepth: this.maxDepth, reflectCap: 3,
       mirrorMat: { ...MIRROR_MAT, tex: this.tex.mirror },
       mirrorOpaque: { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror },
       drawScene: (model, clips, depth) => this._drawScene(model, clips, depth),

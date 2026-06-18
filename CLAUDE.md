@@ -60,7 +60,9 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
   `stencilFunc`, `stencilOp`, `cullFace`).
 - `src/scene.js` — static geometry (textured floor over open cells; the red **start** and
   green **exit** markers; the black boundary box for the finish flash; the path polyline)
-  plus `visibleWalls()` — the camera-facing-mirror-within-fog test, **nearest first**.
+  plus `visibleWallsFrom()` — the camera-facing-mirror-within-range test, **nearest first**,
+  with a grid line-of-sight (`los`) flag per wall. Called per reflection level from that
+  level's reflected virtual camera, not just once for the real camera.
 - `src/mirrors.js` — **the heart**: `drawMirrors()` / `recurse()`, the port of
   `DrawMirrors()`. See below.
 - `src/mech.js` — the player avatar, a box-built walker with a phase-driven gait. The
@@ -98,13 +100,25 @@ Fixed-function pieces re-created by hand, because WebGL 1.0 lacks them:
 - **Winding flip** → each reflection inverts winding, so **odd recursion depths cull
   `FRONT`** (even cull `BACK`), exactly as the C toggled `glCullFace`.
 
-### Invariant: depth 0 vs deeper levels
+### Per-level visibility & the surface/recursion split
 
-The wall list at **depth 0 must be drawn in full** — those textured mirror quads *are* the
-visible walls; capping it would punch holes in the maze. Only the **recursive reflections**
-(depth ≥ 1) are capped to the nearest `reflectCap` (default 3) walls. This bounds the cost
-(naively `walls^depth`, which explodes) while losing nothing visible — deep reflections are
-tiny. If you raise `reflectCap` or the max depth, watch software-renderer / mobile perf.
+Each level recomputes its visible walls from **that level's reflected virtual camera**
+(`reflectCam` mirrors the viewpoint through each wall just as `d.reflect` mirrors the
+geometry; distances from it equal the true folded optical path, so one `range` bounds every
+depth). Two distinct jobs come out of that list:
+
+- **Surfaces** — *every* facing wall in range gets its textured mirror quad. This is what
+  keeps the reflected rooms fully walled; skipping any of them is exactly the old bug where
+  the floor showed through a missing mirror. Cheap (flat quads), so completeness is free.
+- **Reflections** — only the **line-of-sight-visible** nearest `reflectCap` (default 3)
+  walls are recursed into; each recursion is a whole reflected sub-render (cost
+  ~ `walls^depth`), so budget is spent only on mirrors you can actually see. **Depth 0
+  recurses into every visible wall** — those are the real maze walls in front of you and
+  must all reflect.
+
+A wall that gets a surface but no reflection (out of budget, past max depth, or occluded) is
+drawn **opaque**, so it reads as a solid wall rather than a hole onto the void. If you raise
+`reflectCap` or the max depth, watch software-renderer / mobile perf.
 
 ## Coordinate & camera model (`game.js`)
 
@@ -144,7 +158,8 @@ toward the viewer) because reflected/inside-out faces are common.
 ## Invariants to preserve
 
 - Walls are mirrors — don't add separate wall geometry; the reflection pass draws them.
-- Depth-0 wall list stays complete; only deeper reflections are capped.
+- Every facing wall at every level gets a mirror surface (never leave one out — that's the
+  floor-through-the-wall bug); only the *reflections inside* them are budgeted/occlusion-culled.
 - Centering of game logic vs rendering: maze state (`wall`/`next`) is integer/grid; the
   renderer never mutates it except the temporary entrance-open toggle during a frame.
 - No build step, no runtime deps, WebGL 1.0 only.

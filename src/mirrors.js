@@ -13,7 +13,7 @@
 //   • cull-face flipping → reflections invert winding, so odd depths cull FRONT.
 
 import * as M from './mat4.js';
-import { WALL_LEFT, WALL_UP, WALL_RIGHT, WALL_DOWN } from './scene.js';
+import { WALL_LEFT, WALL_UP, WALL_RIGHT, WALL_DOWN, visibleWallsFrom } from './scene.js';
 
 // GL stencil enums are stable numbers; spell them out so this file stays
 // independent of a live context object.
@@ -54,28 +54,47 @@ function wallData(dir, i, j) {
   }
 }
 
-// ctx: { r, proj, view, walls, maxDepth, reflectCap, mirrorMat, drawScene(model, clips, depth) }
-function recurse(ctx, depth, id, model, clips) {
+// Reflect a viewpoint (cx,cz) across a wall's mirror plane — the same isometry
+// `d.reflect` applies to the geometry, in 2D. Threading this down the recursion
+// gives each level the virtual camera it should pick its visible walls from.
+function reflectCam(dir, i, j, cx, cz) {
+  switch (dir) {
+    case WALL_LEFT: return [2 * j - cx, cz];
+    case WALL_RIGHT: return [2 * (j + 1) - cx, cz];
+    case WALL_UP: return [cx, 2 * i - cz];
+    case WALL_DOWN: return [cx, 2 * (i + 1) - cz];
+  }
+}
+
+// ctx: { r, proj, view, maze, range, maxDepth, reflectCap, mirrorMat,
+//        mirrorOpaque, drawScene(model, clips, depth) }
+function recurse(ctx, depth, id, model, clips, camX, camZ) {
   const r = ctx.r;
   const face = (depth & 1) === 1;          // true → cull FRONT (reflected winding)
   const nextId = id + 1;
 
-  // Depth 0 must draw every visible wall — the wall surfaces ARE the mirrors.
-  // Deeper reflections only draw the nearest few walls so the recursion (cost
-  // ~ walls^depth) can't explode. The mirror SURFACES are drawn at every level
-  // up to and including maxDepth; only the reflections inside them (steps 1–2)
-  // stop once we're out of recursion budget — otherwise the deepest reflected
-  // room would show empty space where its walls should be.
-  // Recursing levels are capped tightly — each wall there spawns a whole
-  // reflected sub-render, so cost grows ~ walls^depth. The deepest level does
-  // NOT recurse; it only lays down cheap wall quads, so we can fill in more of
-  // them to avoid gaps in the reflected room.
-  const cap = depth < ctx.maxDepth ? ctx.reflectCap : ctx.reflectCap * 3;
-  const levelWalls = depth === 0 ? ctx.walls : ctx.walls.slice(0, cap);
-  for (const w of levelWalls) {
-    const d = wallData(w.dir, w.i, w.j);
+  // The walls that face THIS viewpoint, within optical range, nearest first.
+  // Recomputed per level from the reflected virtual camera — the old code reused
+  // one real-camera list at every depth, so deep reflections drew the wrong (and
+  // capped) walls and the floor showed through where a mirror should have been.
+  //
+  // Every wall here is laid down as a mirror SURFACE, so the reflected room is
+  // always fully walled (no floor leaks). Only the line-of-sight-visible nearest
+  // `reflectCap` are RECURSED into — each recursion is a whole reflected
+  // sub-render (cost ~ walls^depth), so we spend that budget only on mirrors we
+  // could actually see. Depth 0 recurses into every visible wall: those are the
+  // real maze walls in front of the player and must all reflect.
+  const visible = visibleWallsFrom(ctx.maze, camX, camZ, ctx.range);
+  const unlimited = depth === 0;
+  let recursed = 0;
 
-    if (depth < ctx.maxDepth) {
+  for (const w of visible) {
+    const d = wallData(w.dir, w.i, w.j);
+    const canRecurse = depth < ctx.maxDepth && w.los &&
+      (unlimited || recursed < ctx.reflectCap);
+
+    if (canRecurse) {
+      recursed++;
       // (1) stamp the mirror silhouette into the stencil (color/depth masked
       //     off, INCR-on-pass set by the caller).
       r.cullFace(face);
@@ -84,21 +103,20 @@ function recurse(ctx, depth, id, model, clips) {
       r.drawQuad(d.quad);
 
       // (2) recurse: draw the scene reflected across this wall, clipped to its
-      //     half-space (eye-space plane added to the stack).
+      //     half-space (eye-space plane added to the stack), from the reflected
+      //     virtual camera.
       const planeEye = M.transformPlane(M.multiply(ctx.view, model), d.clip);
-      const childClips = clips.concat([planeEye]);
-      const childModel = M.multiply(model, d.reflect);
-      recurse(ctx, depth + 1, nextId, childModel, childClips);
+      const [rx, rz] = reflectCam(w.dir, w.i, w.j, camX, camZ);
+      recurse(ctx, depth + 1, nextId, M.multiply(model, d.reflect),
+        clips.concat([planeEye]), rx, rz);
     }
 
     // (3) lay the textured mirror over the reflection; REPLACE resets the
     //     stencil to `id` and depth is written so the mirror occludes like a
-    //     wall. While there is reflection budget left the mirror is
-    //     semi-transparent (the reflection shows through); at the deepest level
-    //     there is nothing more to reflect, so we draw it OPAQUE — otherwise the
-    //     reflected room would show the black void behind the glass instead of
-    //     its walls.
-    const deepest = depth === ctx.maxDepth;
+    //     wall. A recursed wall is semi-transparent so its reflection shows
+    //     through; everything else — out of budget, past max depth, or not in
+    //     line of sight — is OPAQUE, so it reads as a solid wall instead of a
+    //     hole onto the void behind the glass.
     r.cullFace(face);
     r.stencilFunc(GL.LEQUAL, id, 0xFF);
     r.stencilOp(GL.KEEP, GL.KEEP, GL.REPLACE);
@@ -106,7 +124,7 @@ function recurse(ctx, depth, id, model, clips) {
     r.depthMask(true);
     r.setClipPlanes(clips);
     r.setMatrices(ctx.proj, M.multiply(ctx.view, model));
-    r.setMaterial(deepest ? (ctx.mirrorOpaque || ctx.mirrorMat) : ctx.mirrorMat);
+    r.setMaterial(canRecurse ? ctx.mirrorMat : (ctx.mirrorOpaque || ctx.mirrorMat));
     r.drawQuad(d.quad);
 
     r.depthMask(false);
@@ -133,7 +151,7 @@ export function drawMirrors(ctx) {
   r.colorMask(false);
   r.depthMask(false);
   r.stencilOp(GL.KEEP, GL.KEEP, GL.INCR);
-  recurse(ctx, 0, 0, M.identity(), []);
+  recurse(ctx, 0, 0, M.identity(), [], ctx.camX, ctx.camZ);
   // restore sane defaults for any non-mirror drawing
   r.stencilOp(GL.KEEP, GL.KEEP, GL.KEEP);
   r.depthMask(true);
