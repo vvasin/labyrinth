@@ -1,0 +1,286 @@
+// App: maze lifecycle, camera, collision, the preview→play→finish state
+// machine, lighting per mode, and the render loop that drives the mirror
+// recursion. Ported from labyrinth.c / display / game / control modules, with
+// the desktop-only frame recorder dropped.
+
+import * as M from './mat4.js';
+import { Maze } from './maze.js';
+import { Renderer } from './renderer.js';
+import { Mech } from './mech.js';
+import { drawMirrors } from './mirrors.js';
+import {
+  buildFloor, buildStartWall, buildEndWall, buildBoundary,
+  buildPathLine, visibleWalls,
+} from './scene.js';
+import { loadSettings, saveSettings } from './persistence.js';
+
+const FOVY = 55, RADIUS = 0.24, FOG_START = 1, FOG_END = 3;
+const SPOT_CUTOFF = Math.cos((35 * Math.PI) / 180), SPOT_EXP = 40, SPOT_ATTEN = 0.2;
+const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
+
+const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
+const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.45, spec: [0.9, 0.9, 0.9], shininess: 60 };
+const START_MAT = { base: [0.85, 0.3, 0.3], emission: [0.5, 0.12, 0.12], unlit: true, alpha: 0.85 };
+const END_MAT = { base: [0.3, 0.85, 0.3], emission: [0.12, 0.5, 0.12], unlit: true, alpha: 0.85 };
+
+export class App {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.r = new Renderer(canvas);
+    this.maze = new Maze();
+    this.mech = new Mech(this.r);
+
+    this.tex = {
+      floor: this.r.loadTexture('textures/floor.bmp'),
+      mirror: this.r.loadTexture('textures/mirror.bmp'),
+      start: this.r.loadTexture('textures/start.bmp'),
+      end: this.r.loadTexture('textures/end.bmp'),
+    };
+
+    const s = loadSettings();
+    this.maxDepth = s.maxDepth;
+    this.input = { f: false, b: false, l: false, rt: false, jx: 0, jy: 0 };
+    this.cheat = false;
+    this.walkPhase = 0;
+    this.animT = 0;
+
+    this.maze.generate(s.N, s.M, s.p, s.q);
+    this._rebuild();
+    this._enterPreview();
+
+    this._dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this._resize();
+    window.addEventListener('resize', () => this._resize());
+
+    this._last = performance.now();
+    this._frame = this._frame.bind(this);
+    requestAnimationFrame(this._frame);
+  }
+
+  // --- maze + meshes ------------------------------------------------------
+  _rebuild() {
+    const r = this.r, mz = this.maze;
+    mz.wall[1][0] = 0; // open the entrance so the floor tile & side walls read right
+    this.floorMesh = r.createMesh(buildFloor(mz));
+    mz.wall[1][0] = 1;
+    this.startMesh = r.createMesh(buildStartWall());
+    this.endMesh = r.createMesh(buildEndWall(mz));
+    this.boundaryMesh = r.createMesh(buildBoundary(mz));
+    this.pathMesh = r.createMesh(buildPathLine(mz.solutionPath()));
+  }
+
+  regenerate() {
+    this.maze.generate();
+    this._rebuild();
+    this._enterPreview();
+  }
+
+  resize(dN) {
+    const N = Math.max(3, Math.min(40, this.maze.N + dN));
+    this.maze.generate(N, N, this.maze.p, this.maze.q);
+    this._rebuild();
+    this._enterPreview();
+    this._save();
+  }
+
+  adjustParam(which, delta) {
+    const clamp = (x) => Math.max(0, Math.min(1, +x.toFixed(3)));
+    if (which === 'p') this.maze.p = clamp(this.maze.p + delta);
+    else this.maze.q = clamp(this.maze.q + delta);
+    this.maze.generate();
+    this._rebuild();
+    this._enterPreview();
+    this._save();
+  }
+
+  setDepth(d) { this.maxDepth = d | 0; this._save(); }
+
+  _save() {
+    saveSettings({
+      N: this.maze.N, M: this.maze.M, p: this.maze.p, q: this.maze.q, maxDepth: this.maxDepth,
+    });
+  }
+
+  // --- state machine ------------------------------------------------------
+  _enterPreview() {
+    this.state = 'p';
+    const mz = this.maze;
+    this.camX = mz.m / 2;
+    this.camY = (Math.max(mz.n, mz.m) / 2 + 1) / Math.tan((FOVY * Math.PI) / 360);
+    this.camZ = mz.n / 2;
+    this.pitch = -90;
+    this.yaw = 0;
+    this.cheat = false;
+  }
+
+  startGame() {
+    if (this.state !== 'p') return;
+    this.state = 's';
+    this.animT = 0;
+    this.camX = 1.5; this.camY = 0.5; this.camZ = 1.5;
+    this.pitch = 0; this.yaw = 90;
+  }
+
+  giveUp() { if (this.state === 'g') this._enterPreview(); }
+  togglePath() { if (this.state === 'g') this.cheat = !this.cheat; }
+
+  // --- camera & movement --------------------------------------------------
+  _parseMove() {
+    const mz = this.maze, w = mz.wall, r = RADIUS;
+    const ix = this.camX | 0, iz = this.camZ | 0;
+    let t;
+    t = Math.floor(this.camZ - r); if (w[t]?.[ix]) this.camZ = t + r + 1;
+    t = Math.floor(this.camZ + r); if (w[t]?.[ix]) this.camZ = t - r;
+    t = Math.floor(this.camX - r); if (w[iz]?.[t]) this.camX = t + r + 1;
+    t = Math.floor(this.camX + r); if (w[iz]?.[t]) this.camX = t - r;
+    if (ix === mz.m - 1 && iz === mz.n - 2) this._finish();
+  }
+
+  _finish() {
+    if (this.state === 'g') { this.state = 'f'; this.animT = 0; }
+  }
+
+  look(dx, dy) {
+    this.pitch = Math.max(-90, Math.min(90, this.pitch + dy * LOOK_SPEED));
+    this.yaw -= dx * LOOK_SPEED;
+  }
+
+  _move(dt) {
+    if (this.state !== 'g') return;
+    const i = this.input;
+    let fwd = (i.f ? 1 : 0) - (i.b ? 1 : 0) - i.jy;
+    let str = (i.l ? 1 : 0) - (i.rt ? 1 : 0) - i.jx;
+    if (fwd === 0 && str === 0) return;
+    const mag = Math.hypot(fwd, str) || 1;
+    const step = (MOVE_SPEED * dt) / (mag > 1 ? mag : 1);
+    const ya = (this.yaw * Math.PI) / 180;
+    const px = this.camX, pz = this.camZ;
+    this.camX += step * fwd * Math.sin(ya) - step * str * Math.cos(ya);
+    this.camZ += -step * fwd * Math.cos(ya) - step * str * Math.sin(ya);
+    this._parseMove();
+    this.walkPhase += Math.hypot(this.camX - px, this.camZ - pz) * 9;
+  }
+
+  // --- per-frame update + lighting ---------------------------------------
+  _update(dt) {
+    if (this.state === 's') {
+      this.animT += dt / ANIM_TIME;
+      if (this.animT >= 1) { this.animT = 0; this.state = 'g'; }
+    } else if (this.state === 'f') {
+      this.animT += dt / ANIM_TIME;
+      if (this.animT >= 1) this._enterPreview();
+    }
+    this._move(dt);
+  }
+
+  _lighting() {
+    const view = this._viewMatrix();
+    const l0 = M.transformVec4(view, [-1.5, 0.5, -1.0, 0]);
+    const len = Math.hypot(l0[0], l0[1], l0[2]) || 1;
+    const dir = [l0[0] / len, l0[1] / len, l0[2] / len];
+    const preview = this.state === 'p';
+    let fogColor = [0, 0, 0], fogStart = FOG_START, fogEnd = FOG_END, fogOn = !preview;
+    if (this.state === 's') { fogStart = FOG_START * this.animT; fogEnd = FOG_END * this.animT; }
+    if (this.state === 'f') {
+      const t = this.animT;
+      fogColor = [t, t, t];
+      fogStart = FOG_START * (1 - t); fogEnd = FOG_END * (1 - t);
+    }
+    return {
+      ambient: [0.2, 0.2, 0.2],
+      light0Dir: dir,
+      light0Color: preview ? [1, 1, 1] : [0.55, 0.55, 0.55],
+      spotOn: !preview,
+      spotColor: [1, 1, 0.7], spotCutoff: SPOT_CUTOFF, spotExp: SPOT_EXP, spotAtten: SPOT_ATTEN,
+      fogOn, fogColor, fogStart, fogEnd,
+    };
+  }
+
+  _viewMatrix() {
+    let v = M.rotateX(M.identity(), -this.pitch);
+    v = M.rotateY(v, this.yaw);
+    v = M.translate(v, -this.camX, -this.camY, -this.camZ);
+    return v;
+  }
+
+  // --- rendering ----------------------------------------------------------
+  _drawScene(model, clips, depth) {
+    const r = this.r, proj = this._proj, view = this._view;
+    r.setClipPlanes(clips);
+
+    // floor
+    r.setMatrices(proj, M.multiply(view, model));
+    r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
+    r.drawMesh(this.floorMesh);
+
+    // mech — drawn only in reflections (depth > 0): like most FPS games we hide
+    // the avatar in the direct view, but you see yourself in the mirror walls.
+    if (depth > 0 && (this.state === 's' || this.state === 'g' || this.state === 'f')) {
+      r.enableCull(false);
+      let base = M.translate(M.identity(), this.camX, 0, this.camZ);
+      base = M.rotateY(base, 180 - this.yaw);
+      base = M.scale(base, 0.32, 0.32, 0.32);
+      this.mech.draw(r, proj, view, model, base, clips, this.walkPhase);
+      r.enableCull(true);
+    }
+
+    // colored start/end markers — overlay (no depth write), like COLOR_WALLS
+    r.depthMask(false);
+    r.setMatrices(proj, M.multiply(view, model));
+    r.setMaterial({ ...START_MAT, tex: this.tex.start });
+    r.drawMesh(this.startMesh);
+    r.setMaterial({ ...END_MAT, tex: this.tex.end });
+    r.drawMesh(this.endMesh);
+    r.depthMask(true);
+
+    // solution path
+    if (this.state === 'p' || this.cheat) {
+      r.setMatrices(proj, M.multiply(view, model));
+      r.setMaterial({ base: [1, 1, 0], unlit: true });
+      r.drawMesh(this.pathMesh, r.gl.LINE_STRIP);
+    }
+  }
+
+  _frame(now) {
+    const dt = Math.min(0.05, (now - this._last) / 1000);
+    this._last = now;
+    this._frames = (this._frames || 0) + 1;
+    this._update(dt);
+
+    const r = this.r, gl = r.gl, mz = this.maze;
+    const aspect = this.canvas.width / this.canvas.height || 1;
+    let proj = M.perspective(FOVY, aspect, 0.1, mz.n + mz.m);
+    proj = M.translate(proj, 0, 0, -0.7);
+    this._proj = proj;
+    this._view = this._viewMatrix();
+
+    const fog = this.state === 'f' ? [this.animT, this.animT, this.animT] : [0, 0, 0];
+    r.beginFrame(this.state === 'p' ? [0.06, 0.06, 0.09] : fog);
+    r.setLighting(this._lighting());
+
+    mz.wall[1][0] = 0; // entrance open during the render pass
+    const walls = visibleWalls(mz, this.camX, this.camZ, FOG_END);
+    drawMirrors({
+      r, proj, view: this._view, walls, maxDepth: this.maxDepth, reflectCap: 3,
+      mirrorMat: { ...MIRROR_MAT, tex: this.tex.mirror },
+      drawScene: (model, clips, depth) => this._drawScene(model, clips, depth),
+    });
+    mz.wall[1][0] = 1;
+
+    if (this.state === 'f') {
+      // black box closing in as the screen flashes white
+      r.setMatrices(proj, M.multiply(this._view, M.identity()));
+      r.setMaterial({ base: [0, 0, 0] });
+      r.drawMesh(this.boundaryMesh);
+    }
+    gl.flush();
+
+    requestAnimationFrame(this._frame);
+  }
+
+  _resize() {
+    const w = this.canvas.clientWidth || window.innerWidth;
+    const h = this.canvas.clientHeight || window.innerHeight;
+    this.r.resize(w, h, this._dpr);
+  }
+}

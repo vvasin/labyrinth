@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Labyrinth</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Full-area GL canvas: the maze renders here; drag anywhere to look. -->
+    <canvas id="glcanvas"></canvas>
+
+    <!-- Top bar: menu + transient hint -->
+    <div id="topbar">
+      <button id="menu-button" aria-label="Menu">≡</button>
+      <span id="hint">Drag to look · Space to enter · ≡ for options</span>
+    </div>
+
+    <!-- Movement joystick (bottom-left) -->
+    <div id="joystick" aria-label="Move"><div id="joy-nub"></div></div>
+
+    <!-- Action buttons (bottom-right) -->
+    <div id="actions">
+      <button id="btn-start" class="action">Enter ▶</button>
+      <button id="btn-giveup" class="action">Give up</button>
+      <button id="btn-path" class="action">Path</button>
+    </div>
+  </div>
+
+  <!-- Options overlay -->
+  <div id="menu-overlay" class="hidden">
+    <div id="menu-panel" role="dialog" aria-label="Options">
+      <header class="menu-head">
+        <span>Labyrinth</span>
+        <button id="menu-close" aria-label="Close">✕</button>
+      </header>
+
+      <button id="btn-gen" class="menu-item">Generate new maze</button>
+
+      <section class="menu-section">
+        <div class="setting">
+          <span>Maze size <b id="size-val">10×10</b></span>
+          <span class="stepper">
+            <button id="btn-smaller">−</button>
+            <button id="btn-bigger">+</button>
+          </span>
+        </div>
+
+        <label class="setting">
+          <span>Mirror depth <b id="depth-val">1</b></span>
+          <input type="range" id="depth" min="0" max="4" step="1" value="1">
+        </label>
+
+        <label class="setting">
+          <span>Twistiness <b id="p-val">0.5</b></span>
+          <input type="range" id="p-slider" min="0" max="1" step="0.1" value="0.5">
+        </label>
+
+        <label class="setting">
+          <span>Branchiness <b id="q-val">0.5</b></span>
+          <input type="range" id="q-slider" min="0" max="1" step="0.1" value="0.5">
+        </label>
+      </section>
+
+      <section class="menu-section help">
+        <h3>Controls</h3>
+        <p><b>Look:</b> drag the view (or arrow keys)</p>
+        <p><b>Move:</b> on-screen stick (or W A S D)</p>
+        <p><b>Enter / give up:</b> Space / R · <b>New maze:</b> G</p>
+        <p><b>Mirror depth:</b> 0–4 · <b>Reveal path:</b> Alt+P</p>
+        <p>Reach the green exit. Every wall is a mirror.</p>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
