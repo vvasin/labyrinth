@@ -66,9 +66,53 @@ function reflectCam(dir, i, j, cx, cz) {
   }
 }
 
+// World-space centre of a wall's mirror face, in the maze xz-plane.
+function faceCenter(dir, i, j) {
+  switch (dir) {
+    case WALL_LEFT: return [j, i + 0.5];
+    case WALL_RIGHT: return [j + 1, i + 0.5];
+    case WALL_UP: return [j + 0.5, i];
+    case WALL_DOWN: return [j + 0.5, i + 1];
+  }
+}
+
+// Decide which visible walls actually get recursed into (the expensive job:
+// each is a whole reflected sub-render, cost ~ walls^depth). Returns a Set of
+// wall objects from `visible`.
+//
+// Depth 0 reflects every wall in line of sight — those are the real walls around
+// the player and must all mirror. Deeper levels keep only the nearest
+// `reflectCap`, but ranked by how CENTRAL each wall is to the mirror we're
+// looking through (the angle off the portal's principal ray), not by raw
+// distance. The wall straight down the portal — e.g. the wall behind you, seen
+// in the mirror ahead — has to win the budget over the near peripheral side
+// walls, or the hall-of-mirrors tunnel collapses into a flat opaque wall.
+function chooseReflections(ctx, depth, visible, camX, camZ, portalX, portalZ) {
+  const set = new Set();
+  if (depth >= ctx.maxDepth) return set;
+  if (depth === 0) {
+    for (const w of visible) if (w.los) set.add(w);
+    return set;
+  }
+  const dx = portalX - camX, dz = portalZ - camZ;
+  const dl = Math.hypot(dx, dz) || 1;
+  const ndx = dx / dl, ndz = dz / dl;
+  const ranked = [];
+  for (const w of visible) {
+    if (!w.los) continue;
+    const [fx, fz] = faceCenter(w.dir, w.i, w.j);
+    const vx = fx - camX, vz = fz - camZ, vl = Math.hypot(vx, vz) || 1;
+    const cos = (vx * ndx + vz * ndz) / vl;   // 1 = dead ahead, < 0 = behind us
+    if (cos > 0) ranked.push({ w, cos });      // drop walls outside the portal cone
+  }
+  ranked.sort((a, b) => b.cos - a.cos);
+  for (let k = 0; k < ranked.length && k < ctx.reflectCap; k++) set.add(ranked[k].w);
+  return set;
+}
+
 // ctx: { r, proj, view, maze, range, maxDepth, reflectCap, mirrorMat,
 //        mirrorOpaque, drawScene(model, clips, depth) }
-function recurse(ctx, depth, id, model, clips, camX, camZ) {
+function recurse(ctx, depth, id, model, clips, camX, camZ, portalX, portalZ) {
   const r = ctx.r;
   const face = (depth & 1) === 1;          // true → cull FRONT (reflected winding)
   const nextId = id + 1;
@@ -79,22 +123,17 @@ function recurse(ctx, depth, id, model, clips, camX, camZ) {
   // capped) walls and the floor showed through where a mirror should have been.
   //
   // Every wall here is laid down as a mirror SURFACE, so the reflected room is
-  // always fully walled (no floor leaks). Only the line-of-sight-visible nearest
-  // `reflectCap` are RECURSED into — each recursion is a whole reflected
-  // sub-render (cost ~ walls^depth), so we spend that budget only on mirrors we
-  // could actually see. Depth 0 recurses into every visible wall: those are the
-  // real maze walls in front of the player and must all reflect.
-  const visible = visibleWallsFrom(ctx.maze, camX, camZ, ctx.range);
-  const unlimited = depth === 0;
-  let recursed = 0;
+  // always fully walled (no floor leaks). Only the chosen few (see
+  // chooseReflections) are RECURSED into; a wall that gets a surface but no
+  // reflection is drawn opaque, reading as a solid wall rather than a hole.
+  const visible = visibleWallsFrom(ctx.maze, camX, camZ, ctx.range, portalX, portalZ);
+  const reflectSet = chooseReflections(ctx, depth, visible, camX, camZ, portalX, portalZ);
 
   for (const w of visible) {
     const d = wallData(w.dir, w.i, w.j);
-    const canRecurse = depth < ctx.maxDepth && w.los &&
-      (unlimited || recursed < ctx.reflectCap);
+    const canRecurse = reflectSet.has(w);
 
     if (canRecurse) {
-      recursed++;
       // (1) stamp the mirror silhouette into the stencil (color/depth masked
       //     off, INCR-on-pass set by the caller).
       r.cullFace(face);
@@ -104,11 +143,14 @@ function recurse(ctx, depth, id, model, clips, camX, camZ) {
 
       // (2) recurse: draw the scene reflected across this wall, clipped to its
       //     half-space (eye-space plane added to the stack), from the reflected
-      //     virtual camera.
+      //     virtual camera. We also pass the portal we're stepping through (this
+      //     wall's face centre) so the child can rank its own mirrors by how
+      //     central they are to it.
       const planeEye = M.transformPlane(M.multiply(ctx.view, model), d.clip);
       const [rx, rz] = reflectCam(w.dir, w.i, w.j, camX, camZ);
+      const [fx, fz] = faceCenter(w.dir, w.i, w.j);
       recurse(ctx, depth + 1, nextId, M.multiply(model, d.reflect),
-        clips.concat([planeEye]), rx, rz);
+        clips.concat([planeEye]), rx, rz, fx, fz);
     }
 
     // (3) lay the textured mirror over the reflection; REPLACE resets the
@@ -151,7 +193,7 @@ export function drawMirrors(ctx) {
   r.colorMask(false);
   r.depthMask(false);
   r.stencilOp(GL.KEEP, GL.KEEP, GL.INCR);
-  recurse(ctx, 0, 0, M.identity(), [], ctx.camX, ctx.camZ);
+  recurse(ctx, 0, 0, M.identity(), [], ctx.camX, ctx.camZ, ctx.camX, ctx.camZ);
   // restore sane defaults for any non-mirror drawing
   r.stencilOp(GL.KEEP, GL.KEEP, GL.KEEP);
   r.depthMask(true);

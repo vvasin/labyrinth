@@ -103,10 +103,15 @@ function lineOfSight(w, x0, z0, x1, z1) {
 // same fog range bounds every level, and deep reflections naturally see less.
 // The scan is clamped to a window around the viewpoint so its cost is O(range²),
 // independent of maze size (and empty once the virtual camera drifts off-grid).
-export function visibleWallsFrom(maze, camX, camZ, range) {
+//
+// `losX,losZ` is where the occlusion ray starts. For the real camera it's the
+// camera itself; for a reflected level it's the PORTAL (the mirror we're looking
+// through), because the virtual camera sits behind that mirror — testing line of
+// sight from there would let the portal wall occlude the whole tunnel beyond it.
+export function visibleWallsFrom(maze, camX, camZ, range, losX = camX, losZ = camZ) {
   const n = maze.n, m = maze.m, w = maze.wall, walls = [];
   const add = (i, j, dir, dist, tx, tz) =>
-    walls.push({ i, j, dir, dist, los: lineOfSight(w, camX, camZ, tx, tz) });
+    walls.push({ i, j, dir, dist, los: lineOfSight(w, losX, losZ, tx, tz) });
 
   const i0 = Math.max(0, Math.floor(camZ - range - 1));
   const i1 = Math.min(n - 1, Math.ceil(camZ + range + 1));
@@ -115,13 +120,18 @@ export function visibleWallsFrom(maze, camX, camZ, range) {
   for (let i = i0; i <= i1; i++) {
     for (let j = j0; j <= j1; j++) {
       if (!(DIST(camX - j - 0.5, camZ - i - 0.5) < range + 1 && w[i][j])) continue;
-      if (j > 0 && !w[i][j - 1] && camX < j + 1)
+      // The facing test is a half-space: the viewpoint must be on the wall's
+      // OPEN side (the side its mirror face shows). The bounds are exact (not
+      // slack by a cell) because the recursion's virtual cameras can sit inside
+      // wall cells — a loose test would there pick a wall's hidden back face and
+      // waste reflection budget on it instead of the wall you actually see.
+      if (j > 0 && !w[i][j - 1] && camX < j)
         add(i, j, WALL_LEFT, DIST(camX - j, camZ - i - 0.5), j - 0.5, i + 0.5);
-      if (j < m - 1 && !w[i][j + 1] && camX > j)
+      if (j < m - 1 && !w[i][j + 1] && camX > j + 1)
         add(i, j, WALL_RIGHT, DIST(camX - j - 1, camZ - i - 0.5), j + 1.5, i + 0.5);
-      if (i > 0 && !w[i - 1][j] && camZ < i + 1)
+      if (i > 0 && !w[i - 1][j] && camZ < i)
         add(i, j, WALL_UP, DIST(camX - j - 0.5, camZ - i), j + 0.5, i - 0.5);
-      if (i < n - 1 && !w[i + 1][j] && camZ > i)
+      if (i < n - 1 && !w[i + 1][j] && camZ > i + 1)
         add(i, j, WALL_DOWN, DIST(camX - j - 0.5, camZ - i - 1), j + 0.5, i + 1.5);
     }
   }

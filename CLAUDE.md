@@ -110,11 +110,19 @@ depth). Two distinct jobs come out of that list:
 - **Surfaces** — *every* facing wall in range gets its textured mirror quad. This is what
   keeps the reflected rooms fully walled; skipping any of them is exactly the old bug where
   the floor showed through a missing mirror. Cheap (flat quads), so completeness is free.
-- **Reflections** — only the **line-of-sight-visible** nearest `reflectCap` (default 3)
-  walls are recursed into; each recursion is a whole reflected sub-render (cost
-  ~ `walls^depth`), so budget is spent only on mirrors you can actually see. **Depth 0
-  recurses into every visible wall** — those are the real maze walls in front of you and
-  must all reflect.
+- **Reflections** — only a few walls are recursed into (each recursion is a whole reflected
+  sub-render, cost ~ `walls^depth`). **Depth 0 reflects every wall in line of sight** — the
+  real maze walls around you. Deeper levels keep the nearest `reflectCap` (default 3), ranked
+  by **centrality to the portal** they're seen through (`chooseReflections`), *not* by raw
+  distance: the wall straight down the tunnel — the wall behind you, seen in the mirror ahead
+  — must win the budget over near peripheral side walls, or the hall-of-mirrors collapses to
+  a flat wall.
+
+Two subtleties make the virtual cameras behave. The facing test in `visibleWallsFrom` is an
+**exact** half-space (no slack cell), because a virtual camera can sit inside a wall and a
+loose test would pick that wall's hidden back face. And line of sight is traced from the
+**portal**, not the virtual camera, since the camera sits behind the mirror it's looking
+through — tracing from there would let the portal wall occlude the whole tunnel beyond it.
 
 A wall that gets a surface but no reflection (out of budget, past max depth, or occluded) is
 drawn **opaque**, so it reads as a solid wall rather than a hole onto the void. If you raise
