@@ -1,13 +1,11 @@
-// Static maze geometry + the per-frame list of visible mirror walls.
+// Static maze geometry + the building blocks the section renderer draws.
 //
-// In the original the maze walls are NOT drawn as ordinary geometry — every
-// interior wall face is a mirror, drawn by the reflection pass (see mirrors.js).
-// So scene.js builds only the things DrawScene drew directly: the textured
-// floor, the coloured start/end markers, and the black boundary box shown on
-// the finish flash. It also reproduces the wall-visibility test that picks
-// which mirror faces to reflect this frame, nearest first.
-
-export const WALL_LEFT = 0, WALL_UP = 1, WALL_RIGHT = 2, WALL_DOWN = 3;
+// The maze walls are NOT ordinary geometry — every interior wall face is a
+// mirror, drawn by the section pass (see sections.js). So scene.js builds the
+// things drawn directly: the full preview floor, a single unit floor tile (one
+// per section), the coloured start/end markers, the black finish box, the
+// solution polyline, and the immediate-mode quad for a mirror wall placed at a
+// section boundary in unfolded ("virtual") world space.
 
 // One vertex = [x,y,z, nx,ny,nz, u,v].
 function v(x, y, z, nx, ny, nz, u, uv) { return [x, y, z, nx, ny, nz, u, uv]; }
@@ -29,6 +27,33 @@ export function buildFloor(maze) {
     }
   }
   return new Float32Array(out);
+}
+
+// A single unit floor tile at the origin cell [0,1]×[0,1]; the section renderer
+// draws one per section, translated to the section's real cell then carried into
+// place by that section's reflection matrix.
+export function buildUnitFloor() {
+  const out = [];
+  pushQuad(out,
+    v(0, 0, 0, 0, 1, 0, 0, 0),
+    v(0, 0, 1, 0, 1, 0, 0, 1),
+    v(1, 0, 1, 0, 1, 0, 1, 1),
+    v(1, 0, 0, 0, 1, 0, 1, 0));
+  return new Float32Array(out);
+}
+
+// A mirror wall quad on one side of virtual cell (vi,vj), in unfolded world
+// space (no model transform — the quad already sits at its drawn position).
+// `dir` is a {dj,di} step (see sections.js). Returns 4 verts for drawQuad.
+export function wallQuad(vi, vj, dir) {
+  const Q = (a, b, c, d, nx, ny, nz) => [
+    [...a, nx, ny, nz, 0, 0], [...b, nx, ny, nz, 1, 0],
+    [...c, nx, ny, nz, 1, 1], [...d, nx, ny, nz, 0, 1],
+  ];
+  if (dir.dj === 1) return Q([vj + 1, 0, vi], [vj + 1, 0, vi + 1], [vj + 1, 1, vi + 1], [vj + 1, 1, vi], 1, 0, 0);
+  if (dir.dj === -1) return Q([vj, 0, vi + 1], [vj, 0, vi], [vj, 1, vi], [vj, 1, vi + 1], -1, 0, 0);
+  if (dir.di === 1) return Q([vj, 0, vi + 1], [vj + 1, 0, vi + 1], [vj + 1, 1, vi + 1], [vj, 1, vi + 1], 0, 0, 1);
+  return Q([vj + 1, 0, vi], [vj, 0, vi], [vj, 1, vi], [vj + 1, 1, vi], 0, 0, -1);
 }
 
 // The start marker (x = 1 face) and the end marker (x = m-1 face).
@@ -60,26 +85,6 @@ export function buildBoundary(maze) {
     v(0, 1, 0, 0, -1, 0, 0, 0), v(m, 1, 0, 0, -1, 0, 0, 0),
     v(m, 1, n, 0, -1, 0, 0, 0), v(0, 1, n, 0, -1, 0, 0, 0));
   return new Float32Array(out);
-}
-
-const DIST = (x, y) => Math.hypot(x, y);
-
-// Camera-facing mirror faces within fog range, sorted nearest-first.
-export function visibleWalls(maze, camX, camZ, fe) {
-  const n = maze.n, m = maze.m, w = maze.wall, walls = [];
-  const add = (i, j, dir, dist) => walls.push({ i, j, dir, dist });
-
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < m; j++) {
-      if (!(DIST(camX - j - 0.5, camZ - i - 0.5) < fe + 1 && w[i][j])) continue;
-      if (j > 0 && !w[i][j - 1] && camX < j + 1) add(i, j, WALL_LEFT, DIST(camX - j, camZ - i - 0.5));
-      if (j < m - 1 && !w[i][j + 1] && camX > j) add(i, j, WALL_RIGHT, DIST(camX - j - 1, camZ - i - 0.5));
-      if (i > 0 && !w[i - 1][j] && camZ < i + 1) add(i, j, WALL_UP, DIST(camX - j - 0.5, camZ - i));
-      if (i < n - 1 && !w[i + 1][j] && camZ > i) add(i, j, WALL_DOWN, DIST(camX - j - 0.5, camZ - i - 1));
-    }
-  }
-  walls.sort((a, b) => a.dist - b.dist);
-  return walls;
 }
 
 // Path polyline (cells → world-space strip points at low height).

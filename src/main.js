@@ -21,7 +21,7 @@ function boot() {
     joystick: $('joystick'), joyNub: $('joy-nub'),
     btnStart: $('btn-start'), btnGen: $('btn-gen'), btnGiveUp: $('btn-giveup'),
     btnPath: $('btn-path'), btnBigger: $('btn-bigger'), btnSmaller: $('btn-smaller'),
-    depth: $('depth'), depthVal: $('depth-val'), sizeVal: $('size-val'),
+    dist: $('dist'), distVal: $('dist-val'), sizeVal: $('size-val'),
     pSlider: $('p-slider'), qSlider: $('q-slider'),
     pVal: $('p-val'), qVal: $('q-val'),
     menuBtn: $('menu-button'), menu: $('menu-overlay'), menuClose: $('menu-close'),

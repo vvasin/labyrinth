@@ -7,10 +7,10 @@ import * as M from './mat4.js';
 import { Maze } from './maze.js';
 import { Renderer } from './renderer.js';
 import { Mech } from './mech.js';
-import { drawMirrors } from './mirrors.js';
+import { computeSections } from './sections.js';
 import {
-  buildFloor, buildStartWall, buildEndWall, buildBoundary,
-  buildPathLine, visibleWalls,
+  buildFloor, buildUnitFloor, buildStartWall, buildEndWall, buildBoundary,
+  buildPathLine, wallQuad,
 } from './scene.js';
 import { loadSettings, saveSettings } from './persistence.js';
 
@@ -48,7 +48,8 @@ export class App {
     };
 
     const s = loadSettings();
-    this.maxDepth = s.maxDepth;
+    this.viewDist = s.viewDist;
+    this.unitFloorMesh = this.r.createMesh(buildUnitFloor());
     this.input = { f: false, b: false, l: false, rt: false, jx: 0, jy: 0 };
     this.cheat = false;
     this.walkPhase = 0;
@@ -105,11 +106,11 @@ export class App {
     this._save();
   }
 
-  setDepth(d) { this.maxDepth = d | 0; this._save(); }
+  setViewDist(d) { this.viewDist = Math.max(1, Math.min(8, d | 0)); this._save(); }
 
   _save() {
     saveSettings({
-      N: this.maze.N, M: this.maze.M, p: this.maze.p, q: this.maze.q, maxDepth: this.maxDepth,
+      N: this.maze.N, M: this.maze.M, p: this.maze.p, q: this.maze.q, viewDist: this.viewDist,
     });
   }
 
@@ -241,41 +242,93 @@ export class App {
   }
 
   // --- rendering ----------------------------------------------------------
-  _drawScene(model, clips, _depth) {
+  // Top-down overview: the whole maze drawn flat, with no mirror walls.
+  _drawPreview() {
     const r = this.r, proj = this._proj, view = this._view;
-    r.setClipPlanes(clips);
+    r.setClipPlanes([]);
+    r.enableCull(true);
 
-    // floor
-    r.setMatrices(proj, M.multiply(view, model));
+    r.setMatrices(proj, view);
     r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
     r.drawMesh(this.floorMesh);
 
-    // mech — the player's own body, drawn at every level so it shows both in the
-    // direct first-person view and reflected in the mirror walls. It stands on
-    // its body axis (camX,camZ) and rotates in place about it; the eye sits just
-    // in front, so the head stays out of the forward view but the torso, arms and
-    // legs swing into frame when you look down.
-    if (this.state === 's' || this.state === 'g' || this.state === 'f') {
-      r.enableCull(false);
-      let base = M.translate(M.identity(), this.camX, 0, this.camZ);
-      base = M.rotateY(base, 180 - this.yaw);
-      base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
-      this.mech.draw(r, proj, view, model, base, clips, this.walkPhase);
-      r.enableCull(true);
-    }
-
-    // colored start/end markers — overlay (no depth write), like COLOR_WALLS
     r.depthMask(false);
-    r.setMatrices(proj, M.multiply(view, model));
     r.setMaterial({ ...START_MAT, tex: this.tex.start });
     r.drawMesh(this.startMesh);
     r.setMaterial({ ...END_MAT, tex: this.tex.end });
     r.drawMesh(this.endMesh);
     r.depthMask(true);
 
-    // solution path
-    if (this.state === 'p' || this.cheat) {
-      r.setMatrices(proj, M.multiply(view, model));
+    r.setMaterial({ base: [1, 1, 0], unlit: true });
+    r.drawMesh(this.pathMesh, r.gl.LINE_STRIP);
+  }
+
+  // First-person: the unfolded section pass. Sections (floor + your reflected
+  // body + the start/end markers) are drawn far→near, then the mirror walls
+  // far→near so the semi-transparent glass composites over the reflections
+  // already laid down behind it.
+  _renderSections() {
+    const r = this.r, proj = this._proj, view = this._view, mz = this.maze;
+    const aspect = this.canvas.width / this.canvas.height || 1;
+    const { sections, walls } = computeSections({
+      maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw,
+      viewDist: this.viewDist, fovy: FOVY, aspect,
+    });
+
+    r.setClipPlanes([]);
+    r.enableCull(false); // reflections flip winding; the shader is two-sided
+
+    const sI = 1, sJ = 1;                 // start room cell
+    const eI = mz.n - 2, eJ = mz.m - 2;   // last room before the exit
+    const showBody = this.state === 's' || this.state === 'g' || this.state === 'f';
+
+    for (const s of sections) {
+      const m = s.model;
+
+      // floor tile for this section's real cell
+      r.setMatrices(proj, M.multiply(view, M.multiply(m, M.translate(M.identity(), s.rj, 0, s.ri))));
+      r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
+      r.drawMesh(this.unitFloorMesh);
+
+      // your own body — drawn on the cell you stand on and on each reflection of
+      // it carried out through the mirrors, so you see yourself in the glass.
+      if (showBody && s.hasBody) {
+        let base = M.translate(M.identity(), this.camX, 0, this.camZ);
+        base = M.rotateY(base, 180 - this.yaw);
+        base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
+        this.mech.draw(r, proj, view, m, base, [], this.walkPhase);
+      }
+
+      // start / end markers — only on their own cell (and its reflections)
+      r.depthMask(false);
+      if (s.ri === sI && s.rj === sJ) {
+        r.setMatrices(proj, M.multiply(view, m));
+        r.setMaterial({ ...START_MAT, tex: this.tex.start });
+        r.drawMesh(this.startMesh);
+      }
+      if (s.ri === eI && s.rj === eJ) {
+        r.setMatrices(proj, M.multiply(view, m));
+        r.setMaterial({ ...END_MAT, tex: this.tex.end });
+        r.drawMesh(this.endMesh);
+      }
+      r.depthMask(true);
+    }
+
+    // mirror walls in unfolded world space — solid where nothing is behind,
+    // semi-transparent where a reflected section shows through.
+    for (const w of walls) {
+      r.setMatrices(proj, view);
+      r.setMaterial(w.transparent
+        ? { ...MIRROR_MAT, tex: this.tex.mirror }
+        : { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror });
+      r.drawQuad(wallQuad(w.vi, w.vj, w.dir));
+    }
+
+    r.enableCull(true);
+
+    // solution path overlay (cheat) — in the real, un-reflected frame only
+    if (this.cheat) {
+      r.setMatrices(proj, view);
       r.setMaterial({ base: [1, 1, 0], unlit: true });
       r.drawMesh(this.pathMesh, r.gl.LINE_STRIP);
     }
@@ -303,13 +356,8 @@ export class App {
     r.setLighting(this._lighting());
 
     mz.wall[1][0] = 0; // entrance open during the render pass
-    const walls = visibleWalls(mz, this.camX, this.camZ, FOG_END);
-    drawMirrors({
-      r, proj, view: this._view, walls, maxDepth: this.maxDepth, reflectCap: 3,
-      mirrorMat: { ...MIRROR_MAT, tex: this.tex.mirror },
-      mirrorOpaque: { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror },
-      drawScene: (model, clips, depth) => this._drawScene(model, clips, depth),
-    });
+    if (this.state === 'p') this._drawPreview();
+    else this._renderSections();
     mz.wall[1][0] = 1;
 
     if (this.state === 'f') {

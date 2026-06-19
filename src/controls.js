@@ -18,8 +18,9 @@ export function bindControls(app, dom) {
       case 'ArrowDown': app.look(0, -10); break;
       case 'ArrowLeft': app.look(10, 0); break;
       case 'ArrowRight': app.look(-10, 0); break;
-      case 'Digit0': case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4':
-        app.setDepth(+e.code.slice(-1)); syncUI(); break;
+      case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4':
+      case 'Digit5': case 'Digit6': case 'Digit7': case 'Digit8':
+        app.setViewDist(+e.code.slice(-1)); syncUI(); break;
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -82,7 +83,7 @@ export function bindControls(app, dom) {
   dom.btnBigger.addEventListener('click', () => { app.resize(+1); syncUI(); });
   dom.btnSmaller.addEventListener('click', () => { app.resize(-1); syncUI(); });
 
-  dom.depth.addEventListener('input', () => { app.setDepth(+dom.depth.value); syncUI(); });
+  dom.dist.addEventListener('input', () => { app.setViewDist(+dom.dist.value); syncUI(); });
   dom.pSlider.addEventListener('change', () => {
     app.adjustParam('p', +dom.pSlider.value - app.maze.p); syncUI();
   });
@@ -95,8 +96,8 @@ export function bindControls(app, dom) {
   dom.menuClose.addEventListener('click', () => dom.menu.classList.add('hidden'));
 
   function syncUI() {
-    dom.depth.value = app.maxDepth;
-    dom.depthVal.textContent = app.maxDepth;
+    dom.dist.value = app.viewDist;
+    dom.distVal.textContent = app.viewDist;
     dom.sizeVal.textContent = `${app.maze.N}×${app.maze.M}`;
     dom.pSlider.value = app.maze.p;
     dom.qSlider.value = app.maze.q;

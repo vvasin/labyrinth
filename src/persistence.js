@@ -1,9 +1,9 @@
-// Best-effort localStorage for maze size, generation params, and mirror depth.
+// Best-effort localStorage for maze size, generation params, and view distance.
 // Any storage/parse failure (private mode, quota, corruption) is swallowed and
 // falls back to defaults.
 
 const KEY = 'labyrinth/settings/v1';
-const DEFAULTS = { N: 10, M: 10, p: 0.5, q: 0.5, maxDepth: 1 };
+const DEFAULTS = { N: 10, M: 10, p: 0.5, q: 0.5, viewDist: 4 };
 
 export function loadSettings() {
   try {
@@ -17,7 +17,7 @@ export function loadSettings() {
       M: num(s.M, DEFAULTS.M, 3, 40),
       p: num(s.p, DEFAULTS.p, 0, 1),
       q: num(s.q, DEFAULTS.q, 0, 1),
-      maxDepth: num(s.maxDepth, DEFAULTS.maxDepth, 0, 4),
+      viewDist: num(s.viewDist, DEFAULTS.viewDist, 1, 8),
     };
   } catch {
     return { ...DEFAULTS };
