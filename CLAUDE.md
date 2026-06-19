@@ -16,10 +16,22 @@ context and is a direct translation of specific fixed-function GL behaviour.
 ## Run & test
 
 ```bash
-npm install          # only needed for `npm run lint`
+npm install          # needed for `npm run lint` and `npm run test:e2e`
 npm start            # dev server (scripts/serve.js) at http://localhost:8792
 npm run lint         # ESLint
+npm run test:e2e     # Playwright smoke test (test/smoke.mjs)
 ```
+
+`test/smoke.mjs` boots the app in a headless browser, drives it through
+`window.__app`, and asserts the section renderer draws real pixels in every state
+with the GL error register staying clean (`glGetError === 0`) and no JS errors.
+
+**Browser to use:** on a local machine run `npx playwright install chromium`
+once. In the sandboxed/remote agent environment the Playwright download CDN is
+blocked, but a Chromium build ships pre-installed under `/opt/pw-browsers` — so
+**when you are NOT on the user's local machine, use the browser from there.** The
+test auto-detects it (and honours a `PLAYWRIGHT_CHROMIUM=/path/to/chrome`
+override); set `SHOTS=<dir>` to also dump screenshots.
 
 No build step — `index.html` loads `src/*.js` as ES modules directly. There are no unit
 tests. The app exposes `window.__app` for introspection/control:
