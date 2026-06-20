@@ -9,6 +9,7 @@
     "start": "node scripts/serve.js",
     "serve": "node scripts/serve.js",
     "lint": "eslint .",
+    "test:unit": "node test/unfold.test.mjs",
     "test:e2e": "node test/smoke.mjs"
   },
   "devDependencies": {
