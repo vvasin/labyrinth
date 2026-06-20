@@ -272,8 +272,12 @@ export class App {
   _renderSections() {
     const r = this.r, gl = r.gl, proj = this._proj, view = this._view, mz = this.maze;
     const aspect = this.canvas.width / this.canvas.height || 1;
+    // The eye sits EYE_FWD ahead of the body axis (see _viewMatrix); the view
+    // sector is measured from there, not from the body centre.
+    const ya = (this.yaw * Math.PI) / 180;
     const { root } = unfoldSections({
       maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw,
+      eyeX: this.camX + EYE_FWD * Math.sin(ya), eyeZ: this.camZ - EYE_FWD * Math.cos(ya),
       viewDist: this.viewDist, fovy: FOVY, aspect,
     });
 

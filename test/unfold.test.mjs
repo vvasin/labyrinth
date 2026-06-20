@@ -120,6 +120,20 @@ test('a cell behind two mirrors holds a different reflection per mirror', () => 
   ]);
 });
 
+// --- the view sector is measured from the eye, not the body ------------------
+test('eyeX/eyeZ (not camX/camZ) drive the view-angle culling', () => {
+  const view = (extra) => unfoldSections({
+    maze: ROOM, camX: 2.5, camZ: 2.5, yaw: 90, viewDist: 6, fovy: 30, aspect: 1, ...extra,
+  });
+  const cells = (r) => new Set(r.draws.map((d) => `${d.vi},${d.vj}`));
+  const body = cells(view({}));                       // viewpoint = body centre
+  const shifted = cells(view({ eyeX: 1.7, eyeZ: 2.5 })); // eye well behind the body
+  // The eye moving changes which sections fall inside the cone.
+  assert.notDeepEqual([...shifted].sort(), [...body].sort());
+  // Same start cell / body cell either way (only the angle origin moved).
+  assert.ok(body.has('2,2') && shifted.has('2,2'));
+});
+
 // --- the result is a tree whose drawn children carry their portal mask -------
 test('drawn sections form a tree; each child records the portal it is seen through', () => {
   const { root } = unfoldSections({

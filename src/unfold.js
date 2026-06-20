@@ -89,8 +89,12 @@ export function unfoldSections(p) {
     viewDist = 6, fovy = 65, aspect = 1, margin = 0, maxSections = 5000,
   } = p;
   const wall = maze.wall;
+  // The body cell (camX,camZ) is the start section and what `hasBody` keys on,
+  // but the viewpoint for the sector / portal angles is the EYE, which sits a
+  // touch ahead of the body. (eyeX,eyeZ default to the body when not supplied.)
+  const { eyeX = camX, eyeZ = camZ } = p;
   const ci = Math.floor(camZ), cj = Math.floor(camX);
-  const ex = camX, ez = camZ;
+  const ex = eyeX, ez = eyeZ;
   const ya = (yaw * PI) / 180;
   const fwdAng = Math.atan2(-Math.cos(ya), Math.sin(ya)); // forward = (sin, -cos)
   const half = Math.atan(Math.tan((fovy * PI) / 360) * aspect) + margin;
