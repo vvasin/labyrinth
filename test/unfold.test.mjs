@@ -100,6 +100,47 @@ test('no virtual-cell dedup: a cell reachable two ways is drawn for each path', 
   for (const d of at13) { assert.equal(d.ri, 1); assert.equal(d.rj, 3); assert.equal(d.mirrored, false); }
 });
 
+// --- one virtual cell, two DIFFERENT reflections (the sketch's section 6) -----
+// A cell walled off but visible past two of its mirrors must hold a different
+// reflection per mirror — so it is drawn once per portal, each to be stencilled
+// to its own wall. This is why the old "draw a virtual cell once" dedup is wrong.
+test('a cell behind two mirrors holds a different reflection per mirror', () => {
+  // eye 8=(2,2); 5=(1,2) open above; 9=(2,3) open right; 6=(1,3) WALL up-right.
+  const M = maze(['11111', '10011', '10001', '11111']);
+  const { draws } = unfoldSections({
+    maze: M, camX: 2.5, camZ: 2.5, yaw: 45, viewDist: 6, fovy: 110, aspect: 1.4,
+  });
+  const at = draws.filter((d) => d.vi === 1 && d.vj === 3)
+    .map((d) => ({ ri: d.ri, rj: d.rj, mirrored: d.mirrored, kind: d.kind }))
+    .sort((a, b) => a.ri - b.ri || a.rj - b.rj);
+  assert.equal(at.length, 2, 'drawn once per mirror, not deduped');
+  assert.deepEqual(at, [
+    { ri: 1, rj: 2, mirrored: true, kind: 'wall' }, // reflection of (1,2) through its left mirror
+    { ri: 2, rj: 3, mirrored: true, kind: 'wall' }, // reflection of (2,3) through the mirror below
+  ]);
+});
+
+// --- the result is a tree whose drawn children carry their portal mask -------
+test('drawn sections form a tree; each child records the portal it is seen through', () => {
+  const { root } = unfoldSections({
+    maze: ROOM, camX: 2.5, camZ: 2.5, yaw: 90, viewDist: 4, fovy: 60, aspect: 1,
+  });
+  assert.equal(root.kind, 'start');
+  assert.equal(root.portalDir, null);
+  let count = 0;
+  const walk = (n) => {
+    count++;
+    for (const c of n.children) {
+      assert.ok(c.portalDir && c.portalVi === n.vi && c.portalVj === n.vj,
+        'child portal edge sits on its parent');
+      assert.ok(c.kind === 'wall' || c.kind === 'opening');
+      walk(c);
+    }
+  };
+  walk(root);
+  assert.ok(count > 1, 'tree has more than just the root');
+});
+
 // --- draw order is far → near, eye's section last ----------------------------
 test('draw list is sorted far → near with the eye section drawn last', () => {
   const { draws } = unfoldSections({

@@ -96,12 +96,12 @@ export function unfoldSections(p) {
   const half = Math.atan(Math.tan((fovy * PI) / 360) * aspect) + margin;
   const isWall = (ri, rj) => (wall[ri] ? wall[ri][rj] : 1) !== 0; // out of bounds → wall
 
-  const visits = [];
-  const draws = [];
+  const visits = [];  // every side considered (incl. culled), depth-first
+  const draws = [];   // drawn sections, later sorted far → near
   const onPath = new Set(); // virtual cells on the current DFS branch (cycle guard)
 
-  const record = (v) => { visits.push(v); if (v.drawn) draws.push(v); };
-
+  // A drawn section doubles as a tree node (it carries `children`) AND as the
+  // traversal state for its own recursion (vi/vj/ri/rj/sx/sz/model).
   function recur(s, sector, cameFrom) {
     if (draws.length > maxSections) return;
     for (const dir of DIRS) {
@@ -110,48 +110,60 @@ export function unfoldSections(p) {
       const nri = s.ri + dir.di * s.sz, nrj = s.rj + dir.dj * s.sx;
       const wallHere = isWall(nri, nrj);
 
-      // Build the child first, so even a culled visit reports the reference cell
+      // Build the node first, so even a culled visit reports the reference cell
       // it would have drawn (matches "if it were drawn, ref would be …").
-      let child;
+      let ri, rj, sx = s.sx, sz = s.sz, mirrored = s.mirrored, model = s.model;
       if (wallHere) {
-        let model, sx = s.sx, sz = s.sz;
+        ri = s.ri; rj = s.rj; mirrored = !s.mirrored;            // reflection of the cell in front
         if (dir.dj === 1) { model = M.multiply(reflectX(s.vj + 1), s.model); sx = -sx; }
         else if (dir.dj === -1) { model = M.multiply(reflectX(s.vj), s.model); sx = -sx; }
         else if (dir.di === 1) { model = M.multiply(reflectZ(s.vi + 1), s.model); sz = -sz; }
         else { model = M.multiply(reflectZ(s.vi), s.model); sz = -sz; }
-        child = { vi: nvi, vj: nvj, ri: s.ri, rj: s.rj, sx, sz, mirrored: !s.mirrored,
-          model, depth: s.depth + 1, portals: s.portals.concat([{ kind: 'wall', dir, vi: s.vi, vj: s.vj }]) };
       } else {
-        child = { vi: nvi, vj: nvj, ri: nri, rj: nrj, sx: s.sx, sz: s.sz, mirrored: s.mirrored,
-          model: s.model, depth: s.depth + 1, portals: s.portals.concat([{ kind: 'opening', dir, vi: s.vi, vj: s.vj }]) };
+        ri = nri; rj = nrj;                                       // real neighbour
       }
       const dist = Math.hypot(nvj + 0.5 - ex, nvi + 0.5 - ez);
-      const rec = { depth: s.depth + 1, vi: nvi, vj: nvj, kind: wallHere ? 'wall' : 'opening',
-        ri: child.ri, rj: child.rj, sx: child.sx, sz: child.sz, mirrored: child.mirrored,
-        hasBody: child.ri === ci && child.rj === cj, dist, model: child.model, portals: child.portals };
+      const node = {
+        depth: s.depth + 1, vi: nvi, vj: nvj, kind: wallHere ? 'wall' : 'opening',
+        ri, rj, sx, sz, mirrored, hasBody: ri === ci && rj === cj, dist, model,
+        portalDir: dir, portalVi: s.vi, portalVj: s.vj, // the edge this section is seen through (its mask)
+        children: [], solidWalls: [],
+      };
+      visits.push(node);
+
+      // A wall whose reflection isn't drawn (culled) must still show as a SOLID
+      // mirror on the parent, so the player never sees the void behind it.
+      const cullSolid = () => { if (wallHere) s.solidWalls.push({ dir, vi: s.vi, vj: s.vj }); };
 
       const [e1, e2] = edgeEndpoints(s.vi, s.vj, dir);
       const span = portalInterval(fwdAng, ex, ez, e1, e2);
-      if (!span) { rec.drawn = false; rec.cull = 'angle'; record(rec); continue; }
+      if (!span) { node.drawn = false; node.cull = 'angle'; cullSolid(); continue; }
       const lo = Math.max(sector[0], span[0]), hi = Math.min(sector[1], span[1]);
-      if (lo >= hi) { rec.drawn = false; rec.cull = 'angle'; record(rec); continue; }
-      if (dist > viewDist) { rec.drawn = false; rec.cull = 'distance'; record(rec); continue; }
+      if (lo >= hi) { node.drawn = false; node.cull = 'angle'; cullSolid(); continue; }
+      if (dist > viewDist) { node.drawn = false; node.cull = 'distance'; cullSolid(); continue; }
       const k = vkey(nvi, nvj);
-      if (onPath.has(k)) { rec.drawn = false; rec.cull = 'cycle'; record(rec); continue; }
+      if (onPath.has(k)) { node.drawn = false; node.cull = 'cycle'; cullSolid(); continue; }
 
-      rec.drawn = true; rec.cull = null; record(rec);
+      node.drawn = true; node.cull = null;
+      draws.push(node);
+      s.children.push(node);
       onPath.add(k);
-      recur(child, [lo, hi], dir);
+      recur(node, [lo, hi], dir);
       onPath.delete(k);
     }
   }
 
-  const start = { vi: ci, vj: cj, ri: ci, rj: cj, sx: 1, sz: 1, mirrored: false, model: M.identity(), depth: 0, portals: [] };
-  record({ depth: 0, vi: ci, vj: cj, ri: ci, rj: cj, sx: 1, sz: 1, mirrored: false,
-    kind: 'start', drawn: true, cull: null, hasBody: true, dist: 0, model: start.model, portals: [] });
+  const root = {
+    depth: 0, vi: ci, vj: cj, kind: 'start', ri: ci, rj: cj, sx: 1, sz: 1,
+    mirrored: false, hasBody: true, dist: 0, model: M.identity(),
+    portalDir: null, portalVi: null, portalVj: null, drawn: true, cull: null,
+    children: [], solidWalls: [],
+  };
+  visits.push(root);
+  draws.push(root);
   onPath.add(vkey(ci, cj));
-  recur(start, [-half, half], null);
+  recur(root, [-half, half], null);
 
   draws.sort((a, b) => b.dist - a.dist); // far → near; the eye's section last
-  return { visits, draws };
+  return { visits, draws, root };
 }

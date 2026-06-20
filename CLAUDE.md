@@ -16,11 +16,18 @@ context and is a direct translation of specific fixed-function GL behaviour.
 ## Run & test
 
 ```bash
-npm install          # needed for `npm run lint` and `npm run test:e2e`
+npm install          # needed for `npm run lint` and the tests
 npm start            # dev server (scripts/serve.js) at http://localhost:8792
 npm run lint         # ESLint
+npm run test:unit    # pure unfolding-algorithm checks (test/unfold.test.mjs, no browser)
 npm run test:e2e     # Playwright smoke test (test/smoke.mjs)
 ```
+
+`test/unfold.test.mjs` exercises `unfoldSections()` with no renderer: it checks
+which sections are drawn, in what order, with which parameters (reference real
+cell, mirrored, body) and how they are culled — including the key correctness
+cases (a cell behind two mirrors holding a different reflection per mirror; no
+virtual-cell dedup; termination between facing mirrors).
 
 `test/smoke.mjs` boots the app in a headless browser, drives it through
 `window.__app`, and asserts the section renderer draws real pixels in every state
@@ -74,8 +81,9 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
   (`buildUnitFloor`, one drawn per section); the red **start** and green **exit** markers;
   the black finish box; the path polyline; and `wallQuad(vi,vj,dir)` — a mirror-wall quad in
   unfolded ("virtual") world space.
-- `src/sections.js` — **the heart**: `computeSections()`, the flood-fill that unfolds the
-  maze across its mirrors into a disk of drawable sections. See below.
+- `src/unfold.js` — **the heart**: `unfoldSections()`, the recursive portal walk that unfolds
+  the maze across its mirrors into a *tree* of drawable sections. Pure (no GL); unit-tested.
+  See below.
 - `src/mech.js` — the player avatar, a box-built walker with a phase-driven gait. The
   original linked the 700-line `glutmech`; we keep only the role (something that reads right
   reflected) with a compact model. Drawn on the player's cell and its mirror images.
@@ -88,39 +96,50 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
 - `src/persistence.js` — best-effort `localStorage` for size / `p` / `q` / view distance.
 - `scripts/serve.js` — zero-dependency static dev server (sets ESM + `.bmp` MIME types).
 
-## The section renderer (`sections.js`) — read before touching rendering
+## The section renderer (`unfold.js` + `game.js`) — read before touching rendering
 
-The visible world is the maze **unfolded** across its mirror walls. From the cell the camera
-stands in we flood-fill outward over a grid of **sections** placed in unfolded ("virtual")
-world space (`computeSections`):
+The visible world is the maze **unfolded** across its mirror walls. `unfoldSections()` does a
+depth-first **portal walk** from the cell the eye stands in. For each of a section's sides
+(skipping the one we came through):
 
-- crossing an **open passage** steps to the real neighbouring cell — a real piece of the
-  maze, same orientation, model matrix unchanged;
-- crossing a **wall** steps to a section that is the **reflection of the cell in front of
-  it** — same real cell, one more axis-aligned reflection composed into its `model` matrix.
+- an **opening** (the real neighbour cell is open) steps to that real cell — same orientation
+  and `model`, a real piece of the maze;
+- a **wall** (the neighbour cell is solid → a mirror) steps to a **reflection of the current
+  cell** — its reference real cell `(ri,rj)` is unchanged, one axis-aligned reflection is
+  composed into `model`, the orientation `sx/sz` flips and `mirrored` toggles.
 
-Each section records its virtual cell `(vi,vj)`, the real cell it draws `(ri,rj)`, the
-orientation signs `sx/sz` (world ±X/±Z → real direction), the accumulated reflection `model`
-(real-maze coords → unfolded world), and `hasBody` (does the player's body ride this cell —
-true on the camera's cell and carried only through mirrors, so you see yourself in the
-glass). A world step `dir={dj,di}` maps to a real step `(dj·sx, di·sz)`; the maze cell there
-being a wall means a mirror, open means a passage.
+Each section keeps its virtual cell `(vi,vj)`, reference real cell `(ri,rj)`, `sx/sz` (world
+±X/±Z → real direction), the reflection `model` (real → unfolded world), `hasBody` (`ri,rj`
+== the eye's cell, so your body draws on your cell **and every reflected copy of it**), the
+**portal** it is seen through (`portalDir/portalVi/portalVj` — its stencil mask), and
+`solidWalls` (wall sides whose reflection was culled, drawn opaque so no void shows). A world
+step `dir={dj,di}` maps to a real step `(dj·sx, di·sz)`.
 
-`game.js`'s `_renderSections` then draws **far → near**: per section a unit floor tile (at
-`model·translate(rj,0,ri)`), the body where `hasBody`, and the start/end markers only on
-their own cell; then the deduped **walls**, also far → near, so the semi-transparent mirror
-glass composites over the reflections already laid behind it. A wall with a section behind it
-(within view) is semi-transparent; one with nothing behind is **solid** (so you don't see the
-void). Backface culling is **off** for the whole pass — reflections flip winding and the
-shader is two-sided — so no per-section winding bookkeeping is needed.
+**No dedup.** The same virtual cell can hold *different* reflections seen through different
+mirrors (e.g. one cell showing a reflection of its left neighbour through one wall and of its
+lower neighbour through another), so each is a separate tree node, each clipped to its own
+portal. Culling is by a **2-D view sector** narrowed at every portal (measured from the fixed
+eye in unfolded space), a **distance** bound (`viewDist`, in section units), and a per-path
+**cycle** guard — together these bound the walk and guarantee termination through facing
+mirrors. The result is a tree (`root`) plus a flat depth-first `visits` log and a `draws`
+list sorted far → near.
 
-### Invariant: the view disk is bounded by area
+`game.js`'s `_renderSections` walks the tree with the **stencil buffer** (this is the
+original `DrawMirrors` structure, now with the sector/distance/cycle filters it lacked). For
+each child: increment the stencil inside the portal's silhouette (`EQUAL level` → `level+1`),
+recurse to draw the subtree masked to `level+1`, lay the semi-transparent mirror **glass**
+over a wall portal, then restore the silhouette to `level` (`LESS level` → REPLACE). After
+its children, the section draws **itself** (floor, body, markers, solid walls) where
+`stencil == level` — children first, so far → near. Backface culling is **off** for the whole
+pass (reflections flip winding; the shader is two-sided).
 
-Sections are keyed by virtual cell and bounded by `viewDist` (in section units) plus a
-forward view-angle cull, so the structure is a **disk** of cells — cost grows with area, not
-the old recursion's `walls^depth`. Two different mirrors reaching the same virtual cell give
-the same reflection, so each cell is computed and drawn once. Raising `viewDist` widens the
-disk; watch software-renderer / mobile perf at the high end.
+### Invariant: the walk is bounded and masked, never deduped
+
+Do not reintroduce virtual-cell dedup — it is wrong (different mirrors give different
+reflections at the same cell). Termination and cost are bounded by the view sector + distance
++ cycle guard, and correctness of overlapping reflections comes from the per-portal stencil
+mask, not from drawing each cell once. Raising `viewDist` deepens the recursion; watch
+software-renderer / mobile perf and the 8-bit stencil depth at the high end.
 
 ## Coordinate & camera model (`game.js`)
 
@@ -134,9 +153,9 @@ disk; watch software-renderer / mobile perf at the high end.
   `s` fog-in transition → `g` gameplay (flashlight + fog) → `f` white-out finish flash →
   back to `p`. The original's longer GLUT scenario animations are compressed to short timed
   transitions.
-- The **entrance cell `[1][0]`** is opened only during the render pass (so the section
-  flood-fill treats it as a passage) and restored after, so the entrance isn't itself a
-  mirror — matching the C.
+- The **entrance cell `[1][0]`** is opened only during the render pass (so the portal walk
+  treats it as a passage) and restored after, so the entrance isn't itself a mirror —
+  matching the C.
 
 ## Lighting (`shaders.js`)
 
@@ -152,17 +171,20 @@ toward the viewer) because reflected/inside-out faces are common.
 - The **glutmech** avatar is a compact box model, not the original 700-line mech, drawn on
   the player's cell and its mirror images (you'd otherwise be staring at the inside of your
   own torso; the C scaled it to 0.1 at your feet — same intent, cleaner result).
-- The recursive **stencil-buffer reflection** is replaced by the bounded section unfolding
-  (see above): a painter's pass over a disk of reflected cells, far → near, instead of
-  `walls^depth` recursion. `GL_MODULATE` lighting is re-implemented in the single shader.
+- The recursive **stencil-buffer reflection** is kept in spirit but reorganised around
+  per-cell **sections** and bounded by a view sector + distance + cycle guard (the original
+  recursed on `walls^depth` with only a depth cap). `GL_MODULATE` lighting is re-implemented
+  in the single shader; `glClipPlane` is no longer needed (each section is a finite cell,
+  masked by the stencil rather than clip planes).
 - UI became **mobile-first on-screen controls** (joystick + buttons + menu) instead of the
   keyboard/right-mouse-look-only desktop build.
 
 ## Invariants to preserve
 
 - Walls are mirrors — don't add separate wall geometry; the section pass draws them.
-- The section grid is keyed by virtual cell and bounded by view distance + angle, so it
-  stays a disk (area-bounded), never an exploding recursion.
+- The portal walk is bounded by the view sector + distance + cycle guard and masked by the
+  per-portal stencil; don't reintroduce virtual-cell dedup (a cell can hold different
+  reflections through different mirrors). Keep `test/unit` green if you touch `unfold.js`.
 - Centering of game logic vs rendering: maze state (`wall`/`next`) is integer/grid; the
   renderer never mutates it except the temporary entrance-open toggle during a frame.
 - No build step, no runtime deps, WebGL 1.0 only.

@@ -7,7 +7,7 @@ import * as M from './mat4.js';
 import { Maze } from './maze.js';
 import { Renderer } from './renderer.js';
 import { Mech } from './mech.js';
-import { computeSections } from './sections.js';
+import { unfoldSections } from './unfold.js';
 import {
   buildFloor, buildUnitFloor, buildStartWall, buildEndWall, buildBoundary,
   buildPathLine, wallQuad,
@@ -263,67 +263,90 @@ export class App {
     r.drawMesh(this.pathMesh, r.gl.LINE_STRIP);
   }
 
-  // First-person: the unfolded section pass. Sections (floor + your reflected
-  // body + the start/end markers) are drawn far→near, then the mirror walls
-  // far→near so the semi-transparent glass composites over the reflections
-  // already laid down behind it.
+  // First-person: the recursive portal unfolding. We walk the section tree
+  // depth-first; each child is masked into its portal's silhouette with the
+  // stencil buffer (so two different reflections that land on the same virtual
+  // cell never bleed into each other), the subtree is drawn, then — for a wall —
+  // the semi-transparent mirror glass is laid over it, and finally each section's
+  // own floor/body/markers are drawn (children first, so far → near).
   _renderSections() {
-    const r = this.r, proj = this._proj, view = this._view, mz = this.maze;
+    const r = this.r, gl = r.gl, proj = this._proj, view = this._view, mz = this.maze;
     const aspect = this.canvas.width / this.canvas.height || 1;
-    const { sections, walls } = computeSections({
+    const { root } = unfoldSections({
       maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw,
       viewDist: this.viewDist, fovy: FOVY, aspect,
     });
 
-    r.setClipPlanes([]);
-    r.enableCull(false); // reflections flip winding; the shader is two-sided
-
     const sI = 1, sJ = 1;                 // start room cell
     const eI = mz.n - 2, eJ = mz.m - 2;   // last room before the exit
     const showBody = this.state === 's' || this.state === 'g' || this.state === 'f';
+    const floorMat = { ...FLOOR_MAT, tex: this.tex.floor };
+    const glassMat = { ...MIRROR_MAT, tex: this.tex.mirror };
+    const solidMat = { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror };
 
-    for (const s of sections) {
-      const m = s.model;
+    r.setClipPlanes([]);
+    r.enableCull(false);          // reflections flip winding; the shader is two-sided
+    gl.enable(gl.STENCIL_TEST);
 
-      // floor tile for this section's real cell
-      r.setMatrices(proj, M.multiply(view, M.multiply(m, M.translate(M.identity(), s.rj, 0, s.ri))));
-      r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
-      r.drawMesh(this.unitFloorMesh);
+    const stamp = (q, func, ref, op) => {
+      gl.disable(gl.DEPTH_TEST);
+      r.colorMask(false); r.depthMask(false);
+      r.stencilFunc(func, ref, 0xFF); r.stencilOp(gl.KEEP, gl.KEEP, op);
+      r.setMatrices(proj, view); r.drawQuad(q);
+      gl.enable(gl.DEPTH_TEST);
+    };
 
-      // your own body — drawn on the cell you stand on and on each reflection of
-      // it carried out through the mirrors, so you see yourself in the glass.
-      if (showBody && s.hasBody) {
+    const drawSelf = (node, level) => {
+      r.colorMask(true); r.depthMask(true);
+      r.stencilFunc(gl.EQUAL, level, 0xFF); r.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+      // floor
+      r.setMatrices(proj, M.multiply(view, M.multiply(node.model, M.translate(M.identity(), node.rj, 0, node.ri))));
+      r.setMaterial(floorMat); r.drawMesh(this.unitFloorMesh);
+      // solid mirror walls (reflection culled → no void behind)
+      for (const w of node.solidWalls) {
+        r.setMatrices(proj, view); r.setMaterial(solidMat); r.drawQuad(wallQuad(w.vi, w.vj, w.dir));
+      }
+      // your body, on your cell and every reflected copy of it
+      if (showBody && node.hasBody) {
         let base = M.translate(M.identity(), this.camX, 0, this.camZ);
         base = M.rotateY(base, 180 - this.yaw);
         base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
-        this.mech.draw(r, proj, view, m, base, [], this.walkPhase);
+        r.stencilFunc(gl.EQUAL, level, 0xFF);
+        this.mech.draw(r, proj, view, node.model, base, [], this.walkPhase);
       }
-
-      // start / end markers — only on their own cell (and its reflections)
-      r.depthMask(false);
-      if (s.ri === sI && s.rj === sJ) {
-        r.setMatrices(proj, M.multiply(view, m));
-        r.setMaterial({ ...START_MAT, tex: this.tex.start });
-        r.drawMesh(this.startMesh);
+      // markers, only on their own cell
+      r.stencilFunc(gl.EQUAL, level, 0xFF); r.depthMask(false);
+      if (node.ri === sI && node.rj === sJ) {
+        r.setMatrices(proj, M.multiply(view, node.model));
+        r.setMaterial({ ...START_MAT, tex: this.tex.start }); r.drawMesh(this.startMesh);
       }
-      if (s.ri === eI && s.rj === eJ) {
-        r.setMatrices(proj, M.multiply(view, m));
-        r.setMaterial({ ...END_MAT, tex: this.tex.end });
-        r.drawMesh(this.endMesh);
+      if (node.ri === eI && node.rj === eJ) {
+        r.setMatrices(proj, M.multiply(view, node.model));
+        r.setMaterial({ ...END_MAT, tex: this.tex.end }); r.drawMesh(this.endMesh);
       }
       r.depthMask(true);
-    }
+    };
 
-    // mirror walls in unfolded world space — solid where nothing is behind,
-    // semi-transparent where a reflected section shows through.
-    for (const w of walls) {
-      r.setMatrices(proj, view);
-      r.setMaterial(w.transparent
-        ? { ...MIRROR_MAT, tex: this.tex.mirror }
-        : { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror });
-      r.drawQuad(wallQuad(w.vi, w.vj, w.dir));
-    }
+    const render = (node, level) => {
+      if (level > 240) return;                 // stencil is 8-bit; keep well clear
+      for (const child of node.children) {
+        const q = wallQuad(child.portalVi, child.portalVj, child.portalDir);
+        stamp(q, gl.EQUAL, level, gl.INCR);    // portal silhouette: level → level+1
+        render(child, level + 1);              // draw the subtree, masked to level+1
+        if (child.kind === 'wall') {           // mirror glass over the reflection
+          r.colorMask(true); r.depthMask(true);
+          r.stencilFunc(gl.EQUAL, level + 1, 0xFF); r.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+          r.setMatrices(proj, view); r.setMaterial(glassMat); r.drawQuad(q);
+        }
+        stamp(q, gl.LESS, level, gl.REPLACE);  // restore the silhouette to level
+      }
+      drawSelf(node, level);
+    };
 
+    render(root, 0);
+
+    gl.disable(gl.STENCIL_TEST);
+    r.colorMask(true); r.depthMask(true);
     r.enableCull(true);
 
     // solution path overlay (cheat) — in the real, un-reflected frame only
