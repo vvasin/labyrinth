@@ -89,15 +89,28 @@ export function unfoldSections(p) {
     viewDist = 6, fovy = 65, aspect = 1, margin = 0, maxSections = 5000,
   } = p;
   const wall = maze.wall;
-  // The body cell (camX,camZ) is the start section and what `hasBody` keys on,
-  // but the viewpoint for the sector / portal angles is the EYE, which sits a
-  // touch ahead of the body. (eyeX,eyeZ default to the body when not supplied.)
-  const { eyeX = camX, eyeZ = camZ } = p;
-  const ci = Math.floor(camZ), cj = Math.floor(camX);
+  // The body cell (camX,camZ) is what `hasBody` keys on, but the VIEWPOINT — and
+  // the cell the walk starts from — is the EYE, which sits a touch ahead of the
+  // body. Starting from the eye's cell matters near a border: the eye can already
+  // be in the next cell, and starting from the body's cell would put the cell in
+  // front of us behind the eye → angle-culled → black until the body crosses over.
+  const { eyeX = camX, eyeZ = camZ, pitch = 0 } = p;
+  const ci = Math.floor(eyeZ), cj = Math.floor(eyeX);   // eye / start cell
+  const bi = Math.floor(camZ), bj = Math.floor(camX);   // body cell (for hasBody)
   const ex = eyeX, ez = eyeZ;
   const ya = (yaw * PI) / 180;
   const fwdAng = Math.atan2(-Math.cos(ya), Math.sin(ya)); // forward = (sin, -cos)
-  const half = Math.atan(Math.tan((fovy * PI) / 360) * aspect) + margin;
+  // Horizontal half-FOV widens with pitch: looking down (or up) the screen spans
+  // a wider range of world azimuths (at straight down, all of them). Take the
+  // widest frustum-corner azimuth for this pitch, plus a little slack — portals
+  // narrow the sector again almost immediately, so erring wide is cheap.
+  const fh = Math.atan(Math.tan((fovy * PI) / 360) * aspect);
+  const tv = Math.tan((fovy * PI) / 360);
+  const pp = Math.abs((pitch * PI) / 180), tf = Math.tan(fh);
+  const half = Math.min(margin + 0.12 + Math.max(
+    Math.atan2(tf, Math.cos(pp) - tv * Math.sin(pp)),
+    Math.atan2(tf, Math.cos(pp) + tv * Math.sin(pp)),
+  ), PI * 0.98);
   const isWall = (ri, rj) => (wall[ri] ? wall[ri][rj] : 1) !== 0; // out of bounds → wall
 
   const visits = [];  // every side considered (incl. culled), depth-first
@@ -129,7 +142,7 @@ export function unfoldSections(p) {
       const dist = Math.hypot(nvj + 0.5 - ex, nvi + 0.5 - ez);
       const node = {
         depth: s.depth + 1, vi: nvi, vj: nvj, kind: wallHere ? 'wall' : 'opening',
-        ri, rj, sx, sz, mirrored, hasBody: ri === ci && rj === cj, dist, model,
+        ri, rj, sx, sz, mirrored, hasBody: ri === bi && rj === bj, dist, model,
         portalDir: dir, portalVi: s.vi, portalVj: s.vj, // the edge this section is seen through (its mask)
         children: [], solidWalls: [],
       };
@@ -159,7 +172,7 @@ export function unfoldSections(p) {
 
   const root = {
     depth: 0, vi: ci, vj: cj, kind: 'start', ri: ci, rj: cj, sx: 1, sz: 1,
-    mirrored: false, hasBody: true, dist: 0, model: M.identity(),
+    mirrored: false, hasBody: ci === bi && cj === bj, dist: 0, model: M.identity(),
     portalDir: null, portalVi: null, portalVj: null, drawn: true, cull: null,
     children: [], solidWalls: [],
   };

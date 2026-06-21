@@ -276,7 +276,7 @@ export class App {
     // sector is measured from there, not from the body centre.
     const ya = (this.yaw * Math.PI) / 180;
     const { root } = unfoldSections({
-      maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw,
+      maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw, pitch: this.pitch,
       eyeX: this.camX + EYE_FWD * Math.sin(ya), eyeZ: this.camZ - EYE_FWD * Math.cos(ya),
       viewDist: this.viewDist, fovy: FOVY, aspect,
     });

@@ -134,6 +134,21 @@ test('eyeX/eyeZ (not camX/camZ) drive the view-angle culling', () => {
   assert.ok(body.has('2,2') && shifted.has('2,2'));
 });
 
+// --- start from the EYE cell, so a cell border never blacks out the view -----
+test('the walk starts from the eye cell, not the body cell', () => {
+  // body sits at the +X border of cell (2,2); the eye, a touch further +X, is
+  // already in (2,3). The walk must start in (2,3) (the cell we look into),
+  // otherwise that cell is behind the eye and angle-culled → black.
+  const { root, draws } = unfoldSections({
+    maze: ROOM, camX: 2.98, camZ: 2.5, yaw: 90, eyeX: 3.05, eyeZ: 2.5,
+    viewDist: 5, fovy: 60, aspect: 1,
+  });
+  assert.equal(root.vi, 2);
+  assert.equal(root.vj, 3);
+  assert.ok(draws.some((d) => d.vi === 2 && d.vj === 3), 'eye cell is drawn');
+  assert.equal(root.hasBody, false, 'body rides (2,2), which is behind the eye here');
+});
+
 // --- the result is a tree whose drawn children carry their portal mask -------
 test('drawn sections form a tree; each child records the portal it is seen through', () => {
   const { root } = unfoldSections({
