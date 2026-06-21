@@ -23,6 +23,9 @@ const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
 // right behind the camera. AVATAR_SCALE puts the head just below eye level;
 // BOB_AMP is the walk-driven head bob applied to the eye.
 const AVATAR_SCALE = 0.23, EYE_FWD = 0.1, BOB_AMP = 0.02;
+// Near clip, and the eye-to-portal distance under which we stop masking the cell
+// ahead (the portal would be in front of the near plane and stamp nothing).
+const NEAR_CLIP = 0.05, NEAR_DOORWAY = 0.12;
 
 const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
 const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.45, spec: [0.9, 0.9, 0.9], shininess: 60 };
@@ -275,15 +278,22 @@ export class App {
     // The eye sits EYE_FWD ahead of the body axis (see _viewMatrix); the view
     // sector is measured from there, not from the body centre.
     const ya = (this.yaw * Math.PI) / 180;
+    const eyeX = this.camX + EYE_FWD * Math.sin(ya), eyeZ = this.camZ - EYE_FWD * Math.cos(ya);
     const { root } = unfoldSections({
       maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw, pitch: this.pitch,
-      eyeX: this.camX + EYE_FWD * Math.sin(ya), eyeZ: this.camZ - EYE_FWD * Math.cos(ya),
-      viewDist: this.viewDist, fovy: FOVY, aspect,
+      eyeX, eyeZ, viewDist: this.viewDist, fovy: FOVY, aspect,
     });
 
     const sI = 1, sJ = 1;                 // start room cell
     const eI = mz.n - 2, eJ = mz.m - 2;   // last room before the exit
     const showBody = this.state === 's' || this.state === 'g' || this.state === 'f';
+    // The avatar straddles a cell border when you stand near one, so draw it on
+    // every real cell its footprint overlaps (each reflection then shows its
+    // own slice, stencil-clipped) — otherwise it gets truncated in mirrors.
+    const BR = 0.16;
+    const bodyHits = (ri, rj) => showBody &&
+      this.camX > rj - BR && this.camX < rj + 1 + BR &&
+      this.camZ > ri - BR && this.camZ < ri + 1 + BR;
     const floorMat = { ...FLOOR_MAT, tex: this.tex.floor };
     const glassMat = { ...MIRROR_MAT, tex: this.tex.mirror };
     const solidMat = { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror };
@@ -310,8 +320,8 @@ export class App {
       for (const w of node.solidWalls) {
         r.setMatrices(proj, view); r.setMaterial(solidMat); r.drawQuad(wallQuad(w.vi, w.vj, w.dir));
       }
-      // your body, on your cell and every reflected copy of it
-      if (showBody && node.hasBody) {
+      // your body, on every cell its footprint overlaps and every reflected copy
+      if (bodyHits(node.ri, node.rj)) {
         let base = M.translate(M.identity(), this.camX, 0, this.camZ);
         base = M.rotateY(base, 180 - this.yaw);
         base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
@@ -334,6 +344,17 @@ export class App {
     const render = (node, level) => {
       if (level > 240) return;                 // stencil is 8-bit; keep well clear
       for (const child of node.children) {
+        const d = child.portalDir;
+        // Distance from the eye to this portal's plane. When we're right in the
+        // doorway (closer than the near clip), the portal quad is entirely in
+        // front of the near plane and stamps nothing — masking would black out
+        // the whole cell beyond. So draw that cell UNMASKED at this level.
+        const planeC = d.dj ? (d.dj === 1 ? child.portalVj + 1 : child.portalVj)
+          : (d.di === 1 ? child.portalVi + 1 : child.portalVi);
+        const planeDist = Math.abs((d.dj ? eyeX : eyeZ) - planeC);
+        const forward = d.dj * Math.sin(ya) - d.di * Math.cos(ya) > 0;
+        if (planeDist < NEAR_DOORWAY && forward) { render(child, level); continue; }
+
         const q = wallQuad(child.portalVi, child.portalVj, child.portalDir);
         stamp(q, gl.EQUAL, level, gl.INCR);    // portal silhouette: level → level+1
         render(child, level + 1);              // draw the subtree, masked to level+1
@@ -374,7 +395,7 @@ export class App {
     // No projection shove: the centre of projection coincides with the rotation
     // pivot (the eye), so the camera turns about itself and sits just in front of
     // the head rather than behind it.
-    const proj = M.perspective(FOVY, aspect, 0.1, far);
+    const proj = M.perspective(FOVY, aspect, NEAR_CLIP, far);
     this._proj = proj;
     this._view = this._viewMatrix();
 
