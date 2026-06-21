@@ -7,10 +7,10 @@ import * as M from './mat4.js';
 import { Maze } from './maze.js';
 import { Renderer } from './renderer.js';
 import { Mech } from './mech.js';
-import { drawMirrors } from './mirrors.js';
+import { unfoldSections } from './unfold.js';
 import {
-  buildFloor, buildStartWall, buildEndWall, buildBoundary,
-  buildPathLine, visibleWalls,
+  buildFloor, buildUnitFloor, buildStartWall, buildEndWall, buildBoundary,
+  buildPathLine, wallQuad,
 } from './scene.js';
 import { loadSettings, saveSettings } from './persistence.js';
 
@@ -23,6 +23,9 @@ const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
 // right behind the camera. AVATAR_SCALE puts the head just below eye level;
 // BOB_AMP is the walk-driven head bob applied to the eye.
 const AVATAR_SCALE = 0.23, EYE_FWD = 0.1, BOB_AMP = 0.02;
+// Near clip, and the eye-to-portal distance under which we stop masking the cell
+// ahead (the portal would be in front of the near plane and stamp nothing).
+const NEAR_CLIP = 0.05, NEAR_DOORWAY = 0.12;
 
 const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
 const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.45, spec: [0.9, 0.9, 0.9], shininess: 60 };
@@ -48,7 +51,8 @@ export class App {
     };
 
     const s = loadSettings();
-    this.maxDepth = s.maxDepth;
+    this.viewDist = s.viewDist;
+    this.unitFloorMesh = this.r.createMesh(buildUnitFloor());
     this.input = { f: false, b: false, l: false, rt: false, jx: 0, jy: 0 };
     this.cheat = false;
     this.walkPhase = 0;
@@ -105,11 +109,11 @@ export class App {
     this._save();
   }
 
-  setDepth(d) { this.maxDepth = d | 0; this._save(); }
+  setViewDist(d) { this.viewDist = Math.max(1, Math.min(8, d | 0)); this._save(); }
 
   _save() {
     saveSettings({
-      N: this.maze.N, M: this.maze.M, p: this.maze.p, q: this.maze.q, maxDepth: this.maxDepth,
+      N: this.maze.N, M: this.maze.M, p: this.maze.p, q: this.maze.q, viewDist: this.viewDist,
     });
   }
 
@@ -241,41 +245,138 @@ export class App {
   }
 
   // --- rendering ----------------------------------------------------------
-  _drawScene(model, clips, _depth) {
+  // Top-down overview: the whole maze drawn flat, with no mirror walls.
+  _drawPreview() {
     const r = this.r, proj = this._proj, view = this._view;
-    r.setClipPlanes(clips);
+    r.setClipPlanes([]);
+    r.enableCull(true);
 
-    // floor
-    r.setMatrices(proj, M.multiply(view, model));
+    r.setMatrices(proj, view);
     r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
     r.drawMesh(this.floorMesh);
 
-    // mech — the player's own body, drawn at every level so it shows both in the
-    // direct first-person view and reflected in the mirror walls. It stands on
-    // its body axis (camX,camZ) and rotates in place about it; the eye sits just
-    // in front, so the head stays out of the forward view but the torso, arms and
-    // legs swing into frame when you look down.
-    if (this.state === 's' || this.state === 'g' || this.state === 'f') {
-      r.enableCull(false);
-      let base = M.translate(M.identity(), this.camX, 0, this.camZ);
-      base = M.rotateY(base, 180 - this.yaw);
-      base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
-      this.mech.draw(r, proj, view, model, base, clips, this.walkPhase);
-      r.enableCull(true);
-    }
-
-    // colored start/end markers — overlay (no depth write), like COLOR_WALLS
     r.depthMask(false);
-    r.setMatrices(proj, M.multiply(view, model));
     r.setMaterial({ ...START_MAT, tex: this.tex.start });
     r.drawMesh(this.startMesh);
     r.setMaterial({ ...END_MAT, tex: this.tex.end });
     r.drawMesh(this.endMesh);
     r.depthMask(true);
 
-    // solution path
-    if (this.state === 'p' || this.cheat) {
-      r.setMatrices(proj, M.multiply(view, model));
+    r.setMaterial({ base: [1, 1, 0], unlit: true });
+    r.drawMesh(this.pathMesh, r.gl.LINE_STRIP);
+  }
+
+  // First-person: the recursive portal unfolding. We walk the section tree
+  // depth-first; each child is masked into its portal's silhouette with the
+  // stencil buffer (so two different reflections that land on the same virtual
+  // cell never bleed into each other), the subtree is drawn, then — for a wall —
+  // the semi-transparent mirror glass is laid over it, and finally each section's
+  // own floor/body/markers are drawn (children first, so far → near).
+  _renderSections() {
+    const r = this.r, gl = r.gl, proj = this._proj, view = this._view, mz = this.maze;
+    const aspect = this.canvas.width / this.canvas.height || 1;
+    // The eye sits EYE_FWD ahead of the body axis (see _viewMatrix); the view
+    // sector is measured from there, not from the body centre.
+    const ya = (this.yaw * Math.PI) / 180;
+    const eyeX = this.camX + EYE_FWD * Math.sin(ya), eyeZ = this.camZ - EYE_FWD * Math.cos(ya);
+    const { root } = unfoldSections({
+      maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw, pitch: this.pitch,
+      eyeX, eyeZ, viewDist: this.viewDist, fovy: FOVY, aspect,
+    });
+
+    const sI = 1, sJ = 1;                 // start room cell
+    const eI = mz.n - 2, eJ = mz.m - 2;   // last room before the exit
+    const showBody = this.state === 's' || this.state === 'g' || this.state === 'f';
+    // The avatar straddles a cell border when you stand near one, so draw it on
+    // every real cell its footprint overlaps (each reflection then shows its
+    // own slice, stencil-clipped) — otherwise it gets truncated in mirrors.
+    const BR = 0.16;
+    const bodyHits = (ri, rj) => showBody &&
+      this.camX > rj - BR && this.camX < rj + 1 + BR &&
+      this.camZ > ri - BR && this.camZ < ri + 1 + BR;
+    const floorMat = { ...FLOOR_MAT, tex: this.tex.floor };
+    const glassMat = { ...MIRROR_MAT, tex: this.tex.mirror };
+    const solidMat = { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror };
+
+    r.setClipPlanes([]);
+    r.enableCull(false);          // reflections flip winding; the shader is two-sided
+    gl.enable(gl.STENCIL_TEST);
+
+    const stamp = (q, func, ref, op) => {
+      gl.disable(gl.DEPTH_TEST);
+      r.colorMask(false); r.depthMask(false);
+      r.stencilFunc(func, ref, 0xFF); r.stencilOp(gl.KEEP, gl.KEEP, op);
+      r.setMatrices(proj, view); r.drawQuad(q);
+      gl.enable(gl.DEPTH_TEST);
+    };
+
+    const drawSelf = (node, level) => {
+      r.colorMask(true); r.depthMask(true);
+      r.stencilFunc(gl.EQUAL, level, 0xFF); r.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+      // floor
+      r.setMatrices(proj, M.multiply(view, M.multiply(node.model, M.translate(M.identity(), node.rj, 0, node.ri))));
+      r.setMaterial(floorMat); r.drawMesh(this.unitFloorMesh);
+      // solid mirror walls (reflection culled → no void behind)
+      for (const w of node.solidWalls) {
+        r.setMatrices(proj, view); r.setMaterial(solidMat); r.drawQuad(wallQuad(w.vi, w.vj, w.dir));
+      }
+      // your body, on every cell its footprint overlaps and every reflected copy
+      if (bodyHits(node.ri, node.rj)) {
+        let base = M.translate(M.identity(), this.camX, 0, this.camZ);
+        base = M.rotateY(base, 180 - this.yaw);
+        base = M.scale(base, AVATAR_SCALE, AVATAR_SCALE, AVATAR_SCALE);
+        r.stencilFunc(gl.EQUAL, level, 0xFF);
+        this.mech.draw(r, proj, view, node.model, base, [], this.walkPhase);
+      }
+      // markers, only on their own cell
+      r.stencilFunc(gl.EQUAL, level, 0xFF); r.depthMask(false);
+      if (node.ri === sI && node.rj === sJ) {
+        r.setMatrices(proj, M.multiply(view, node.model));
+        r.setMaterial({ ...START_MAT, tex: this.tex.start }); r.drawMesh(this.startMesh);
+      }
+      if (node.ri === eI && node.rj === eJ) {
+        r.setMatrices(proj, M.multiply(view, node.model));
+        r.setMaterial({ ...END_MAT, tex: this.tex.end }); r.drawMesh(this.endMesh);
+      }
+      r.depthMask(true);
+    };
+
+    const render = (node, level) => {
+      if (level > 240) return;                 // stencil is 8-bit; keep well clear
+      for (const child of node.children) {
+        const d = child.portalDir;
+        // Distance from the eye to this portal's plane. When we're right in the
+        // doorway (closer than the near clip), the portal quad is entirely in
+        // front of the near plane and stamps nothing — masking would black out
+        // the whole cell beyond. So draw that cell UNMASKED at this level.
+        const planeC = d.dj ? (d.dj === 1 ? child.portalVj + 1 : child.portalVj)
+          : (d.di === 1 ? child.portalVi + 1 : child.portalVi);
+        const planeDist = Math.abs((d.dj ? eyeX : eyeZ) - planeC);
+        const forward = d.dj * Math.sin(ya) - d.di * Math.cos(ya) > 0;
+        if (planeDist < NEAR_DOORWAY && forward) { render(child, level); continue; }
+
+        const q = wallQuad(child.portalVi, child.portalVj, child.portalDir);
+        stamp(q, gl.EQUAL, level, gl.INCR);    // portal silhouette: level → level+1
+        render(child, level + 1);              // draw the subtree, masked to level+1
+        if (child.kind === 'wall') {           // mirror glass over the reflection
+          r.colorMask(true); r.depthMask(true);
+          r.stencilFunc(gl.EQUAL, level + 1, 0xFF); r.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+          r.setMatrices(proj, view); r.setMaterial(glassMat); r.drawQuad(q);
+        }
+        stamp(q, gl.LESS, level, gl.REPLACE);  // restore the silhouette to level
+      }
+      drawSelf(node, level);
+    };
+
+    render(root, 0);
+
+    gl.disable(gl.STENCIL_TEST);
+    r.colorMask(true); r.depthMask(true);
+    r.enableCull(true);
+
+    // solution path overlay (cheat) — in the real, un-reflected frame only
+    if (this.cheat) {
+      r.setMatrices(proj, view);
       r.setMaterial({ base: [1, 1, 0], unlit: true });
       r.drawMesh(this.pathMesh, r.gl.LINE_STRIP);
     }
@@ -294,7 +395,7 @@ export class App {
     // No projection shove: the centre of projection coincides with the rotation
     // pivot (the eye), so the camera turns about itself and sits just in front of
     // the head rather than behind it.
-    const proj = M.perspective(FOVY, aspect, 0.1, far);
+    const proj = M.perspective(FOVY, aspect, NEAR_CLIP, far);
     this._proj = proj;
     this._view = this._viewMatrix();
 
@@ -303,13 +404,8 @@ export class App {
     r.setLighting(this._lighting());
 
     mz.wall[1][0] = 0; // entrance open during the render pass
-    const walls = visibleWalls(mz, this.camX, this.camZ, FOG_END);
-    drawMirrors({
-      r, proj, view: this._view, walls, maxDepth: this.maxDepth, reflectCap: 3,
-      mirrorMat: { ...MIRROR_MAT, tex: this.tex.mirror },
-      mirrorOpaque: { ...MIRROR_MAT, alpha: 1, tex: this.tex.mirror },
-      drawScene: (model, clips, depth) => this._drawScene(model, clips, depth),
-    });
+    if (this.state === 'p') this._drawPreview();
+    else this._renderSections();
     mz.wall[1][0] = 1;
 
     if (this.state === 'f') {

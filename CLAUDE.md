@@ -16,10 +16,29 @@ context and is a direct translation of specific fixed-function GL behaviour.
 ## Run & test
 
 ```bash
-npm install          # only needed for `npm run lint`
+npm install          # needed for `npm run lint` and the tests
 npm start            # dev server (scripts/serve.js) at http://localhost:8792
 npm run lint         # ESLint
+npm run test:unit    # pure unfolding-algorithm checks (test/unfold.test.mjs, no browser)
+npm run test:e2e     # Playwright smoke test (test/smoke.mjs)
 ```
+
+`test/unfold.test.mjs` exercises `unfoldSections()` with no renderer: it checks
+which sections are drawn, in what order, with which parameters (reference real
+cell, mirrored, body) and how they are culled — including the key correctness
+cases (a cell behind two mirrors holding a different reflection per mirror; no
+virtual-cell dedup; termination between facing mirrors).
+
+`test/smoke.mjs` boots the app in a headless browser, drives it through
+`window.__app`, and asserts the section renderer draws real pixels in every state
+with the GL error register staying clean (`glGetError === 0`) and no JS errors.
+
+**Browser to use:** on a local machine run `npx playwright install chromium`
+once. In the sandboxed/remote agent environment the Playwright download CDN is
+blocked, but a Chromium build ships pre-installed under `/opt/pw-browsers` — so
+**when you are NOT on the user's local machine, use the browser from there.** The
+test auto-detects it (and honours a `PLAYWRIGHT_CHROMIUM=/path/to/chrome`
+override); set `SHOTS=<dir>` to also dump screenshots.
 
 No build step — `index.html` loads `src/*.js` as ES modules directly. There are no unit
 tests. The app exposes `window.__app` for introspection/control:
@@ -29,7 +48,7 @@ const a = window.__app;
 a.startGame();             // preview → first person
 a.state = 'g';             // force gameplay (skip the fog-in animation)
 a.camX = 2.5; a.camZ = 1.5; a.yaw = 120; a.pitch = -5;   // place the camera
-a.setDepth(2);             // mirror reflection depth (0–4)
+a.setViewDist(4);          // how many sections deep the unfolding reaches (1–8)
 a.regenerate();            // new maze, back to preview
 a.maze.solutionPath();     // list of cells from entrance to exit
 a._frames;                 // frame counter (cheap liveness check for tests)
@@ -51,60 +70,76 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
   `j`=col=world X.
 - `src/shaders.js` — GLSL. One program: ambient + a directional key light + a
   camera-mounted **spotlight (the flashlight)**, linear fog, optional texturing, material
-  emission (the coloured markers), and **up to `MAX_CLIP` shader clip planes** the mirror
-  recursion needs. All lighting is in **eye space**.
+  emission (the coloured markers), and up to `MAX_CLIP` shader clip planes (the section
+  renderer leaves these off, but they stay available). All lighting is in **eye space**.
 - `src/renderer.js` — WebGL context, the shader program, texture loading (BMP decodes in
   the browser via `<img>`; we redraw onto a power-of-two canvas so WebGL 1.0 can mipmap +
-  REPEAT), mesh buffers, an immediate-mode `drawQuad` (one scratch buffer, for mirror
+  REPEAT), mesh buffers, an immediate-mode `drawQuad` (one scratch buffer, for wall
   quads), and thin **GL-state wrappers named after the C calls** (`colorMask`, `depthMask`,
-  `stencilFunc`, `stencilOp`, `cullFace`).
-- `src/scene.js` — static geometry (textured floor over open cells; the red **start** and
-  green **exit** markers; the black boundary box for the finish flash; the path polyline)
-  plus `visibleWalls()` — the camera-facing-mirror-within-fog test, **nearest first**.
-- `src/mirrors.js` — **the heart**: `drawMirrors()` / `recurse()`, the port of
-  `DrawMirrors()`. See below.
+  `cullFace`, `enableCull`).
+- `src/scene.js` — static geometry: the full preview floor; a single **unit floor tile**
+  (`buildUnitFloor`, one drawn per section); the red **start** and green **exit** markers;
+  the black finish box; the path polyline; and `wallQuad(vi,vj,dir)` — a mirror-wall quad in
+  unfolded ("virtual") world space.
+- `src/unfold.js` — **the heart**: `unfoldSections()`, the recursive portal walk that unfolds
+  the maze across its mirrors into a *tree* of drawable sections. Pure (no GL); unit-tested.
+  See below.
 - `src/mech.js` — the player avatar, a box-built walker with a phase-driven gait. The
   original linked the 700-line `glutmech`; we keep only the role (something that reads right
-  reflected) with a compact model. Drawn **only in reflections**.
+  reflected) with a compact model. Drawn on the player's cell and its mirror images.
 - `src/game.js` — `App`: maze lifecycle, the camera, collision (`_parseMove`), the
-  preview→play→finish state machine, per-mode lighting, and the render loop that wires the
-  mirror recursion to the scene draw. The desktop-only frame recorder was dropped.
+  preview→play→finish state machine, per-mode lighting, and the render loop — `_drawPreview`
+  (top-down, no walls) and `_renderSections` (the first-person unfolding). The desktop-only
+  frame recorder was dropped.
 - `src/controls.js` — keyboard, drag-to-look (pointer), the touch joystick, and the menu
   wiring.
-- `src/persistence.js` — best-effort `localStorage` for size / `p` / `q` / mirror depth.
+- `src/persistence.js` — best-effort `localStorage` for size / `p` / `q` / view distance.
 - `scripts/serve.js` — zero-dependency static dev server (sets ESM + `.bmp` MIME types).
 
-## The mirror renderer (`mirrors.js`) — read before touching rendering
+## The section renderer (`unfold.js` + `game.js`) — read before touching rendering
 
-Ported from `DrawMirrors(depth, id)`. For each visible mirror wall, at each recursion level:
+The visible world is the maze **unfolded** across its mirror walls. `unfoldSections()` does a
+depth-first **portal walk** from the cell the eye stands in. For each of a section's sides
+(skipping the one we came through):
 
-1. **Stamp** the mirror's silhouette into the stencil buffer (colour/depth masked off,
-   `INCR` on pass), marking the region its reflection will fill.
-2. **Recurse**: draw the *entire scene reflected* across that wall — via a reflection matrix
-   (`scale(-1)·translate`) accumulated into the model matrix — clipped to the wall's
-   half-space and to the stencil region. The reflection is drawn one stencil level deeper.
-3. **Overlay** the semi-transparent mirror texture (`REPLACE` resets the stencil, depth is
-   written) so the mirror reads as a real wall and occludes correctly.
+- an **opening** (the real neighbour cell is open) steps to that real cell — same orientation
+  and `model`, a real piece of the maze;
+- a **wall** (the neighbour cell is solid → a mirror) steps to a **reflection of the current
+  cell** — its reference real cell `(ri,rj)` is unchanged, one axis-aligned reflection is
+  composed into `model`, the orientation `sx/sz` flips and `mirrored` toggles.
 
-After the per-wall loop, the **un-reflected** scene is drawn at that level too.
+Each section keeps its virtual cell `(vi,vj)`, reference real cell `(ri,rj)`, `sx/sz` (world
+±X/±Z → real direction), the reflection `model` (real → unfolded world), `hasBody` (`ri,rj`
+== the eye's cell, so your body draws on your cell **and every reflected copy of it**), the
+**portal** it is seen through (`portalDir/portalVi/portalVj` — its stencil mask), and
+`solidWalls` (wall sides whose reflection was culled, drawn opaque so no void shows). A world
+step `dir={dj,di}` maps to a real step `(dj·sx, di·sz)`.
 
-Fixed-function pieces re-created by hand, because WebGL 1.0 lacks them:
+**No dedup.** The same virtual cell can hold *different* reflections seen through different
+mirrors (e.g. one cell showing a reflection of its left neighbour through one wall and of its
+lower neighbour through another), so each is a separate tree node, each clipped to its own
+portal. Culling is by a **2-D view sector** narrowed at every portal (measured from the fixed
+eye in unfolded space), a **distance** bound (`viewDist`, in section units), and a per-path
+**cycle** guard — together these bound the walk and guarantee termination through facing
+mirrors. The result is a tree (`root`) plus a flat depth-first `visits` log and a `draws`
+list sorted far → near.
 
-- **Matrix stack** → an accumulated `model` matrix threaded through the recursion.
-- **`glClipPlane`** → planes transformed to eye space (`mat4.transformPlane`) and pushed on
-  a stack; the fragment shader discards anything behind any active plane. The clip-plane
-  signs/values are copied verbatim from the C (they're in world space at definition; the
-  shader compares the interpolated eye position).
-- **Winding flip** → each reflection inverts winding, so **odd recursion depths cull
-  `FRONT`** (even cull `BACK`), exactly as the C toggled `glCullFace`.
+`game.js`'s `_renderSections` walks the tree with the **stencil buffer** (this is the
+original `DrawMirrors` structure, now with the sector/distance/cycle filters it lacked). For
+each child: increment the stencil inside the portal's silhouette (`EQUAL level` → `level+1`),
+recurse to draw the subtree masked to `level+1`, lay the semi-transparent mirror **glass**
+over a wall portal, then restore the silhouette to `level` (`LESS level` → REPLACE). After
+its children, the section draws **itself** (floor, body, markers, solid walls) where
+`stencil == level` — children first, so far → near. Backface culling is **off** for the whole
+pass (reflections flip winding; the shader is two-sided).
 
-### Invariant: depth 0 vs deeper levels
+### Invariant: the walk is bounded and masked, never deduped
 
-The wall list at **depth 0 must be drawn in full** — those textured mirror quads *are* the
-visible walls; capping it would punch holes in the maze. Only the **recursive reflections**
-(depth ≥ 1) are capped to the nearest `reflectCap` (default 3) walls. This bounds the cost
-(naively `walls^depth`, which explodes) while losing nothing visible — deep reflections are
-tiny. If you raise `reflectCap` or the max depth, watch software-renderer / mobile perf.
+Do not reintroduce virtual-cell dedup — it is wrong (different mirrors give different
+reflections at the same cell). Termination and cost are bounded by the view sector + distance
++ cycle guard, and correctness of overlapping reflections comes from the per-portal stencil
+mask, not from drawing each cell once. Raising `viewDist` deepens the recursion; watch
+software-renderer / mobile perf and the 8-bit stencil depth at the high end.
 
 ## Coordinate & camera model (`game.js`)
 
@@ -118,8 +153,9 @@ tiny. If you raise `reflectCap` or the max depth, watch software-renderer / mobi
   `s` fog-in transition → `g` gameplay (flashlight + fog) → `f` white-out finish flash →
   back to `p`. The original's longer GLUT scenario animations are compressed to short timed
   transitions.
-- The **entrance cell `[1][0]`** is opened only during the render pass (floor + mirror
-  finding) and restored after, so the entrance isn't itself a mirror — matching the C.
+- The **entrance cell `[1][0]`** is opened only during the render pass (so the portal walk
+  treats it as a passage) and restored after, so the entrance isn't itself a mirror —
+  matching the C.
 
 ## Lighting (`shaders.js`)
 
@@ -132,19 +168,23 @@ toward the viewer) because reflected/inside-out faces are common.
 ## How the port diverges from the C (all intentional)
 
 - The **frame recorder** (ffmpeg PPM dump) and fullscreen toggle are gone.
-- The **glutmech** avatar is a compact box model, not the original 700-line mech, and is
-  drawn **only in reflections** (you'd otherwise be staring at the inside of your own torso;
-  the C scaled it to 0.1 at your feet — same intent, cleaner result).
-- Mirror **recursion is capped** at deeper levels (see the invariant above).
-- Fixed-function `glClipPlane` / matrix stack / `GL_MODULATE` lighting are re-implemented in
-  the single shader + JS matrix code.
+- The **glutmech** avatar is a compact box model, not the original 700-line mech, drawn on
+  the player's cell and its mirror images (you'd otherwise be staring at the inside of your
+  own torso; the C scaled it to 0.1 at your feet — same intent, cleaner result).
+- The recursive **stencil-buffer reflection** is kept in spirit but reorganised around
+  per-cell **sections** and bounded by a view sector + distance + cycle guard (the original
+  recursed on `walls^depth` with only a depth cap). `GL_MODULATE` lighting is re-implemented
+  in the single shader; `glClipPlane` is no longer needed (each section is a finite cell,
+  masked by the stencil rather than clip planes).
 - UI became **mobile-first on-screen controls** (joystick + buttons + menu) instead of the
   keyboard/right-mouse-look-only desktop build.
 
 ## Invariants to preserve
 
-- Walls are mirrors — don't add separate wall geometry; the reflection pass draws them.
-- Depth-0 wall list stays complete; only deeper reflections are capped.
+- Walls are mirrors — don't add separate wall geometry; the section pass draws them.
+- The portal walk is bounded by the view sector + distance + cycle guard and masked by the
+  per-portal stencil; don't reintroduce virtual-cell dedup (a cell can hold different
+  reflections through different mirrors). Keep `test/unit` green if you touch `unfold.js`.
 - Centering of game logic vs rendering: maze state (`wall`/`next`) is integer/grid; the
   renderer never mutates it except the temporary entrance-open toggle during a frame.
 - No build step, no runtime deps, WebGL 1.0 only.
