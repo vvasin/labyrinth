@@ -17,7 +17,7 @@ export function loadSettings() {
       M: num(s.M, DEFAULTS.M, 3, 40),
       p: num(s.p, DEFAULTS.p, 0, 1),
       q: num(s.q, DEFAULTS.q, 0, 1),
-      viewDist: num(s.viewDist, DEFAULTS.viewDist, 1, 8),
+      viewDist: num(s.viewDist, DEFAULTS.viewDist, 4, 16),
     };
   } catch {
     return { ...DEFAULTS };

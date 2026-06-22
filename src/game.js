@@ -14,7 +14,11 @@ import {
 } from './scene.js';
 import { loadSettings, saveSettings } from './persistence.js';
 
-const FOVY = 65, RADIUS = 0.24, FOG_START = 1, FOG_END = 3;
+const FOVY = 65, RADIUS = 0.24;
+// Fog is tied to the view distance (see _lighting): it reaches fully opaque at
+// the radial cutoff where the section walk stops, and starts fading in at this
+// fraction of that distance.
+const FOG_NEAR_FRAC = 0.35;
 const SPOT_CUTOFF = Math.cos((35 * Math.PI) / 180), SPOT_EXP = 40, SPOT_ATTEN = 0.2;
 const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
 // First-person avatar: camX/camZ is the actor's body centre — the vertical yaw
@@ -28,7 +32,7 @@ const AVATAR_SCALE = 0.23, EYE_FWD = 0.1, BOB_AMP = 0.02;
 const NEAR_CLIP = 0.05, NEAR_DOORWAY = 0.12;
 
 const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
-const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.45, spec: [0.9, 0.9, 0.9], shininess: 60 };
+const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.22, spec: [0.9, 0.9, 0.9], shininess: 60 };
 // The markers carry emission so they still glow, but are lit (not `unlit`) so
 // they pass through fog and depth like real geometry — otherwise the unlit
 // branch in the shader skips fog and the exit shows through distant walls that
@@ -109,7 +113,7 @@ export class App {
     this._save();
   }
 
-  setViewDist(d) { this.viewDist = Math.max(1, Math.min(8, d | 0)); this._save(); }
+  setViewDist(d) { this.viewDist = Math.max(4, Math.min(16, d | 0)); this._save(); }
 
   _save() {
     saveSettings({
@@ -228,12 +232,24 @@ export class App {
     const len = Math.hypot(l0[0], l0[1], l0[2]) || 1;
     const dir = [l0[0] / len, l0[1] / len, l0[2] / len];
     const preview = this.state === 'p';
-    let fogColor = [0, 0, 0], fogStart = FOG_START, fogEnd = FOG_END, fogOn = !preview;
-    if (this.state === 's') { fogStart = FOG_START * this.animT; fogEnd = FOG_END * this.animT; }
+    // Sync the fog to the view distance so the world dissolves into fog exactly
+    // where the section walk stops drawing cells — geometry never pops in/out at
+    // the recursion boundary. The cull is radial (distance to the cell) while fog
+    // is by forward depth, so on a wide screen a diagonal sight-line reaches a
+    // touch farther than a straight-ahead one; that's the intended corner case.
+    // The cull drops a cell when its CENTRE passes `viewDist`, but that cell's
+    // near wall edge is up to half a cell closer (forward depth ≈ viewDist-0.5).
+    // So fog must reach full half a cell BEFORE the cull radius — otherwise the
+    // near edge is still semi-transparent when its cell is dropped and the wall
+    // snaps out. (Fog is by forward depth while the cull is radial, so on a wide
+    // screen a diagonal sight-line fades a touch later — the intended corner case.)
+    let fogColor = [0, 0, 0], fogOn = !preview;
+    let fogEnd = this.viewDist - 0.5, fogStart = this.viewDist * FOG_NEAR_FRAC;
+    if (this.state === 's') { fogStart *= this.animT; fogEnd *= this.animT; }
     if (this.state === 'f') {
       const t = this.animT;
       fogColor = [t, t, t];
-      fogStart = FOG_START * (1 - t); fogEnd = FOG_END * (1 - t);
+      fogStart *= (1 - t); fogEnd *= (1 - t);
     }
     return {
       ambient: [0.2, 0.2, 0.2],

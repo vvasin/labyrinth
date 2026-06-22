@@ -140,14 +140,14 @@ async function main() {
       a.camX = c.y + 0.5; a.camZ = c.x + 0.5; a.yaw = 0; a.pitch = 0;
     });
     let sweepOk = true, mid = null;
-    for (const vd of [1, 2, 4, 8]) {
+    for (const vd of [4, 8, 16]) {
       await page.evaluate((v) => window.__app.setViewDist(v), vd);
       await settle();
       mid = await page.evaluate(PIXELS);
       if ((await glErr()) !== 0 || mid.nonblackFrac < 0.2) sweepOk = false;
     }
     if (SHOTS) await page.screenshot({ path: join(SHOTS, 'mid.png') });
-    check('view-distance sweep (1,2,4,8) stays clean', sweepOk,
+    check('view-distance sweep (4,8,16) stays clean', sweepOk,
       `last nonblack=${mid.nonblackFrac.toFixed(2)}`);
 
     // 4) every state + lifecycle transition keeps the GL error register clean
