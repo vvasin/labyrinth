@@ -25,6 +25,7 @@ const UNIFORMS = [
   'uBaseColor', 'uSpecColor', 'uShininess', 'uEmission', 'uAlpha', 'uUnlit',
   'uUseTex', 'uTex',
   'uFogOn', 'uFogColor', 'uFogStart', 'uFogEnd',
+  'uResolution', 'uTime',
   'uClipCount',
 ];
 
@@ -169,13 +170,41 @@ export class Renderer {
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.uniform2f(this.u.uResolution, this.canvas.width, this.canvas.height);
   }
 
   beginFrame(clearColor) {
     const gl = this.gl;
+    // Refresh the screen-space-effect uniforms (resolution survives resize, but
+    // set it here too in case the first frame beat the resize) and tick time.
+    gl.uniform2f(this.u.uResolution, this.canvas.width, this.canvas.height);
+    gl.uniform1f(this.u.uTime, (performance.now() % 100000) / 1000);
     gl.clearColor(clearColor[0], clearColor[1], clearColor[2], 1);
     gl.clearStencil(0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+  }
+
+  // Upload a (power-of-two) canvas into a GL texture with mipmaps + REPEAT wrap.
+  _uploadCanvas(tex, cv) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  }
+
+  // Build a GL texture from a ready-drawn canvas (the procedural textures). The
+  // canvas must already be power-of-two so WebGL 1.0 can mipmap + REPEAT.
+  textureFromCanvas(cv) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    this._uploadCanvas(tex, cv);
+    return tex;
   }
 
   // Load a texture from a URL. BMPs decode in modern browsers via <img>; we
@@ -194,15 +223,7 @@ export class Renderer {
       cv.height = pot(img.height);
       const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, cv.width, cv.height);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      this._uploadCanvas(tex, cv);
     };
     img.onerror = () => { /* keep the grey placeholder */ };
     img.src = url;
