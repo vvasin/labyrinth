@@ -27,9 +27,11 @@ function unitCube() {
 }
 
 const MATERIALS = {
-  body: { base: [0.55, 0.58, 0.66], spec: [0.6, 0.6, 0.7], shininess: 24 },
-  joint: { base: [0.78, 0.42, 0.18], spec: [0.7, 0.5, 0.3], shininess: 16 },
-  head: { base: [0.35, 0.75, 0.85], emission: [0.06, 0.18, 0.2], spec: [0.8, 0.8, 0.8], shininess: 48 },
+  // Brushed gunmetal plating, warm amber joint actuators, and a glowing cyan
+  // visor head — high spec so it catches the flashlight and reads in mirrors.
+  body: { base: [0.32, 0.36, 0.44], spec: [0.85, 0.9, 1.0], shininess: 64 },
+  joint: { base: [0.85, 0.45, 0.16], emission: [0.18, 0.07, 0.0], spec: [0.9, 0.7, 0.4], shininess: 40 },
+  head: { base: [0.2, 0.7, 0.85], emission: [0.1, 0.5, 0.65], spec: [0.95, 1.0, 1.0], shininess: 90 },
 };
 
 export class Mech {

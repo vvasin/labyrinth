@@ -12,6 +12,7 @@ import {
   buildFloor, buildUnitFloor, buildStartWall, buildEndWall, buildBoundary,
   buildPathLine, wallQuad,
 } from './scene.js';
+import { floorTexture, mirrorTexture, startTexture, endTexture } from './textures.js';
 import { loadSettings, saveSettings } from './persistence.js';
 
 const FOVY = 65, RADIUS = 0.24;
@@ -31,14 +32,19 @@ const AVATAR_SCALE = 0.23, EYE_FWD = 0.1, BOB_AMP = 0.02;
 // ahead (the portal would be in front of the near plane and stamp nothing).
 const NEAR_CLIP = 0.05, NEAR_DOORWAY = 0.12;
 
-const FLOOR_MAT = { base: [0.78, 0.74, 0.95], spec: [0.5, 0.42, 0.42], shininess: 10 };
-const MIRROR_MAT = { base: [0.62, 0.66, 0.72], alpha: 0.22, spec: [0.9, 0.9, 0.9], shininess: 60 };
+// Colours are authored for the linear→tonemap→gamma pipeline in shaders.js, so
+// they sit a little darker/cooler here and lift to a polished look on screen.
+const FLOOR_MAT = { base: [0.55, 0.58, 0.72], spec: [0.7, 0.78, 0.95], shininess: 24 };
+const MIRROR_MAT = { base: [0.6, 0.68, 0.8], alpha: 0.2, spec: [1.0, 1.0, 1.0], shininess: 90 };
+// Distance into fog where the world dissolves; kept just off pure black so the
+// far dark reads as deep atmosphere, not a void. The clear colour matches it.
+const FOG_TINT = [0.015, 0.022, 0.038];
 // The markers carry emission so they still glow, but are lit (not `unlit`) so
 // they pass through fog and depth like real geometry — otherwise the unlit
 // branch in the shader skips fog and the exit shows through distant walls that
 // (being beyond fog range) were never drawn to occlude it.
-const START_MAT = { base: [0.85, 0.3, 0.3], emission: [0.55, 0.14, 0.14], alpha: 0.85 };
-const END_MAT = { base: [0.3, 0.85, 0.3], emission: [0.14, 0.55, 0.14], alpha: 0.85 };
+const START_MAT = { base: [0.95, 0.32, 0.34], emission: [0.85, 0.18, 0.2], spec: [0.8, 0.5, 0.5], shininess: 30, alpha: 0.9 };
+const END_MAT = { base: [0.32, 0.95, 0.5], emission: [0.16, 0.8, 0.4], spec: [0.5, 0.8, 0.6], shininess: 30, alpha: 0.9 };
 
 export class App {
   constructor(canvas) {
@@ -48,10 +54,10 @@ export class App {
     this.mech = new Mech(this.r);
 
     this.tex = {
-      floor: this.r.loadTexture('textures/floor.bmp'),
-      mirror: this.r.loadTexture('textures/mirror.bmp'),
-      start: this.r.loadTexture('textures/start.bmp'),
-      end: this.r.loadTexture('textures/end.bmp'),
+      floor: this.r.textureFromCanvas(floorTexture()),
+      mirror: this.r.textureFromCanvas(mirrorTexture()),
+      start: this.r.textureFromCanvas(startTexture()),
+      end: this.r.textureFromCanvas(endTexture()),
     };
 
     const s = loadSettings();
@@ -243,7 +249,7 @@ export class App {
     // near edge is still semi-transparent when its cell is dropped and the wall
     // snaps out. (Fog is by forward depth while the cull is radial, so on a wide
     // screen a diagonal sight-line fades a touch later — the intended corner case.)
-    let fogColor = [0, 0, 0], fogOn = !preview;
+    let fogColor = preview ? [0, 0, 0] : FOG_TINT.slice(), fogOn = !preview;
     let fogEnd = this.viewDist - 0.5, fogStart = this.viewDist * FOG_NEAR_FRAC;
     if (this.state === 's') { fogStart *= this.animT; fogEnd *= this.animT; }
     if (this.state === 'f') {
@@ -251,12 +257,19 @@ export class App {
       fogColor = [t, t, t];
       fogStart *= (1 - t); fogEnd *= (1 - t);
     }
+    // Gentle flashlight flicker — a slow, shallow wobble so the corridors feel
+    // alive rather than statically lit; disabled on the flat preview.
+    const flick = preview ? 1 : 0.92 + 0.08 * Math.sin(performance.now() * 0.011)
+      + 0.03 * Math.sin(performance.now() * 0.047);
     return {
-      ambient: [0.2, 0.2, 0.2],
+      // Cool, dim fill so unlit surfaces sink into shadow; the warm flashlight
+      // does the real work. Preview is flat and bright for a clean top-down read.
+      ambient: preview ? [0.5, 0.52, 0.6] : [0.07, 0.09, 0.14],
       light0Dir: dir,
-      light0Color: preview ? [1, 1, 1] : [0.55, 0.55, 0.55],
+      light0Color: preview ? [0.95, 0.95, 1.05] : [0.16, 0.2, 0.32],
       spotOn: !preview,
-      spotColor: [1, 1, 0.7], spotCutoff: SPOT_CUTOFF, spotExp: SPOT_EXP, spotAtten: SPOT_ATTEN,
+      spotColor: [1.08 * flick, 0.9 * flick, 0.64 * flick],
+      spotCutoff: SPOT_CUTOFF, spotExp: SPOT_EXP, spotAtten: SPOT_ATTEN,
       fogOn, fogColor, fogStart, fogEnd,
     };
   }
@@ -435,8 +448,8 @@ export class App {
     this._proj = proj;
     this._view = this._viewMatrix();
 
-    const fog = this.state === 'f' ? [this.animT, this.animT, this.animT] : [0, 0, 0];
-    r.beginFrame(this.state === 'p' ? [0.06, 0.06, 0.09] : fog);
+    const fog = this.state === 'f' ? [this.animT, this.animT, this.animT] : FOG_TINT;
+    r.beginFrame(this.state === 'p' ? [0.04, 0.05, 0.08] : fog);
     r.setLighting(this._lighting());
 
     mz.wall[1][0] = 0; // entrance open during the render pass
