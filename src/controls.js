@@ -91,10 +91,13 @@ export function bindControls(app, dom) {
     app.input.ly = y;  // screen-up (y<0) → look up
   });
 
+  // Preview has nothing to control, so swap the joysticks for a big Enter button.
+  app.onStateChange = (st) => document.body.classList.toggle('preview', st === 'p');
+
   // --- buttons + sliders -------------------------------------------------
-  // The play actions live in the menu now; close it so the game is visible.
+  // Give up / path / generate live in the menu; close it so the game is visible.
   const closeMenu = () => dom.menu.classList.add('hidden');
-  dom.btnStart.addEventListener('click', () => { app.startGame(); closeMenu(); });
+  dom.btnStart.addEventListener('click', () => app.startGame());
   dom.btnGen.addEventListener('click', () => { app.regenerate(); closeMenu(); });
   dom.btnGiveUp.addEventListener('click', () => { app.giveUp(); closeMenu(); });
   dom.btnPath.addEventListener('click', () => app.togglePath());
@@ -128,6 +131,10 @@ export function bindControls(app, dom) {
 
 // A round thumbstick: the nub tracks the active pointer (clamped to radius R) and
 // `onChange` receives the normalised offset (−1..1 on each axis), zeroed on release.
+// The reported magnitude is shaped non-linearly — the unit direction is scaled by
+// t² (t = linear deflection 0..1) — so near the centre small moves barely change
+// the speed (fine aim) while the difference grows toward the edge. The nub itself
+// still follows the finger linearly; only the speed it reports is curved.
 function bindJoystick(joy, nub, onChange) {
   const R = 42;
   let id = null;
@@ -135,7 +142,8 @@ function bindJoystick(joy, nub, onChange) {
     const len = Math.hypot(dx, dy);
     if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
     nub.style.transform = `translate(${dx}px, ${dy}px)`;
-    onChange(dx / R, dy / R);
+    const nx = dx / R, ny = dy / R, t = Math.hypot(nx, ny); // t = deflection 0..1
+    onChange(nx * t, ny * t); // |(nx,ny)·t| = t² → quadratic response
   };
   const track = (e) => {
     const rc = joy.getBoundingClientRect();

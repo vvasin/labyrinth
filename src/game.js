@@ -72,6 +72,7 @@ export class App {
     this.animT = 0;
     this.bob = 0;        // current camera head-bob offset (eased)
     this.moving = false; // did the player move this frame
+    this._uiState = null; // last state mirrored to the UI (see onStateChange)
 
     this.maze.generate(s.N, s.M, s.p, s.q);
     this._rebuild();
@@ -451,6 +452,13 @@ export class App {
     this._last = now;
     this._frames = (this._frames || 0) + 1;
     this._update(dt);
+
+    // Let the UI react to state changes (e.g. show the overview Enter button and
+    // hide the joysticks in preview, where there is nothing to control).
+    if (this.state !== this._uiState) {
+      this._uiState = this.state;
+      this.onStateChange?.(this.state);
+    }
 
     const r = this.r, gl = r.gl, mz = this.maze;
     if (this.state === 'p') this._framePreview(); // re-fit to the live aspect each frame

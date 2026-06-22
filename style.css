@@ -180,11 +180,34 @@ html, body {
   color: var(--text);
 }
 .menu-item:active { background: var(--btn-active); }
-.menu-item.primary {
-  background: linear-gradient(135deg, rgba(60, 200, 140, 0.5), rgba(40, 150, 110, 0.55));
+
+/* --- overview Enter button (preview only) --- */
+.overview-enter {
+  position: absolute;
+  left: 50%;
+  bottom: max(36px, calc(env(safe-area-inset-bottom) + 28px));
+  transform: translateX(-50%);
+  min-width: 200px;
+  padding: 16px 28px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
   border: 1px solid rgba(120, 240, 190, 0.45);
-  box-shadow: 0 0 18px rgba(60, 220, 150, 0.3);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(60, 200, 140, 0.55), rgba(40, 150, 110, 0.6));
+  box-shadow: 0 0 22px rgba(60, 220, 150, 0.35), 0 4px 18px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform 0.05s, box-shadow 0.15s;
+  display: none; /* shown only in preview (see body.preview below) */
 }
+.overview-enter:active { transform: translateX(-50%) scale(0.96); }
+
+/* Preview: nothing to drive, so hide the sticks and reveal the Enter button. */
+body.preview #joystick,
+body.preview #lookstick { display: none; }
+body.preview .overview-enter { display: block; }
 
 .menu-section {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
