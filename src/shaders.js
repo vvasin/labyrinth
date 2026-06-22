@@ -131,23 +131,27 @@ void main() {
     color += uSpotColor * fres * 0.1 / (1.0 + uSpotAtten * length(vEye));
   }
 
-  // Filmic tonemap of the lit (HDR-ish) colour, then atmosphere on top so the
-  // fog and white-out finish stay their exact authored colours.
+  // Filmic tonemap of the lit (HDR-ish) colour, then gamma-encode the surface.
   color = tonemap(color);
+  color = pow(color, vec3(0.4545));   // approx sRGB; lighting above is linear-ish
 
+  // Screen-space vignette: darken the corners to focus the eye down the maze.
+  // Applied to the lit surface only (before fog) so it never offsets the
+  // fully-fogged colour from the cleared background.
+  vec2 uv = gl_FragCoord.xy / uResolution;
+  float vig = smoothstep(1.2, 0.35, length(uv - 0.5));
+  color *= mix(1.0, vig, 0.4);
+
+  // Atmospheric fog — the LAST major step, so a fully-fogged fragment collapses
+  // to exactly uFogColor (which the frame clears to). This keeps the original
+  // contract: fog is synced to the view distance and reaches full opacity right
+  // at the cull radius, hiding the walls the section walk stopped drawing with
+  // no visible seam at that boundary. uFogColor is therefore in display space.
   if (uFogOn > 0.5) {
     float f = clamp((uFogEnd + vEye.z) / (uFogEnd - uFogStart), 0.0, 1.0);
     // vEye.z is negative in front of the camera, so -vEye.z is the distance.
     color = mix(uFogColor, color, f);
   }
-
-  // Gamma encode (approx sRGB) — lighting above is done in linear-ish space.
-  color = pow(color, vec3(0.4545));
-
-  // Screen-space vignette: darken the corners to focus the eye down the maze.
-  vec2 uv = gl_FragCoord.xy / uResolution;
-  float vig = smoothstep(1.2, 0.35, length(uv - 0.5));
-  color *= mix(1.0, vig, 0.4);
 
   // Animated ordered-ish dither to break up banding in the dark fog gradients.
   float dn = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)) + uTime) * 43758.5453);
