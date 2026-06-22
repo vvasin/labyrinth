@@ -62,14 +62,23 @@ function relAngle(fwdAng, ex, ez, x, z) {
   return a;
 }
 
-// Angular interval [lo,hi] a portal edge subtends from the eye, or null if it
-// lies behind the eye (subtends > PI → not a forward-facing portal).
+// Angular interval [lo,hi] (relative to forward) a portal edge subtends from the
+// eye. A straight edge always subtends the SHORT arc between its endpoint
+// directions (< PI, exactly PI only with the eye on the edge's line), so we walk
+// from a1 by the signed, wrap-normalised gap to a2 rather than taking min/max of
+// the two raw angles — the latter silently flips to the > PI complement when the
+// short arc straddles the rear (±PI) direction, which happens when the eye sits
+// almost on the edge's own plane (standing on a cell border). That flip used to
+// return null and wrongly cull the cell beyond as "behind"; the interval may now
+// run outside [-PI,PI], which the caller intersects against the (forward,
+// non-wrapping) view sector — a rear-straddling edge simply misses the sector.
 function portalInterval(fwdAng, ex, ez, e1, e2) {
   const a1 = relAngle(fwdAng, ex, ez, e1[0], e1[1]);
   const a2 = relAngle(fwdAng, ex, ez, e2[0], e2[1]);
-  const lo = Math.min(a1, a2), hi = Math.max(a1, a2);
-  if (hi - lo > PI) return null;
-  return [lo, hi];
+  let d = a2 - a1;
+  while (d > PI) d -= 2 * PI;
+  while (d <= -PI) d += 2 * PI;   // signed short-arc gap, in (-PI, PI]
+  return [Math.min(a1, a1 + d), Math.max(a1, a1 + d)];
 }
 
 // Unfold the maze around the camera.
@@ -154,7 +163,8 @@ export function unfoldSections(p) {
 
       const [e1, e2] = edgeEndpoints(s.vi, s.vj, dir);
       const span = portalInterval(fwdAng, ex, ez, e1, e2);
-      if (!span) { node.drawn = false; node.cull = 'angle'; cullSolid(); continue; }
+      // The view sector is forward-facing and never wraps; an edge whose arc
+      // straddles the rear simply fails to overlap it and is culled here.
       const lo = Math.max(sector[0], span[0]), hi = Math.min(sector[1], span[1]);
       if (lo >= hi) { node.drawn = false; node.cull = 'angle'; cullSolid(); continue; }
       if (dist > viewDist) { node.drawn = false; node.cull = 'distance'; cullSolid(); continue; }
