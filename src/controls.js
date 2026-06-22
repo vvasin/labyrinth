@@ -54,9 +54,6 @@ export function bindControls(app, dom) {
       case 'ArrowDown': app.look(0, -10); break;
       case 'ArrowLeft': app.look(10, 0); break;
       case 'ArrowRight': app.look(-10, 0); break;
-      case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4':
-      case 'Digit5': case 'Digit6': case 'Digit7': case 'Digit8':
-        app.setViewDist(+e.code.slice(-1)); syncUI(); break;
     }
   });
   window.addEventListener('keyup', (e) => {

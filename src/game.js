@@ -113,7 +113,7 @@ export class App {
     this._save();
   }
 
-  setViewDist(d) { this.viewDist = Math.max(1, Math.min(16, d | 0)); this._save(); }
+  setViewDist(d) { this.viewDist = Math.max(4, Math.min(16, d | 0)); this._save(); }
 
   _save() {
     saveSettings({
@@ -237,10 +237,13 @@ export class App {
     // the recursion boundary. The cull is radial (distance to the cell) while fog
     // is by forward depth, so on a wide screen a diagonal sight-line reaches a
     // touch farther than a straight-ahead one; that's the intended corner case.
-    // The cull keeps cells whose CENTRE is within `viewDist`, so the far faces of
-    // the last drawn ring sit ~half a cell beyond that — fog clears there.
+    // Fog clears exactly at `viewDist` — the radial cull radius — so a cell
+    // straight ahead is fully fogged by the time the walk drops it: it dissolves
+    // into fog instead of popping. (Fog is by forward depth while the cull is
+    // radial, so on a wide screen a diagonal sight-line — shorter forward depth
+    // at the same radius — fades a touch later; that's the intended corner case.)
     let fogColor = [0, 0, 0], fogOn = !preview;
-    let fogEnd = this.viewDist + 0.5, fogStart = this.viewDist * FOG_NEAR_FRAC;
+    let fogEnd = this.viewDist, fogStart = this.viewDist * FOG_NEAR_FRAC;
     if (this.state === 's') { fogStart *= this.animT; fogEnd *= this.animT; }
     if (this.state === 'f') {
       const t = this.animT;

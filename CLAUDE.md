@@ -48,7 +48,7 @@ const a = window.__app;
 a.startGame();             // preview → first person
 a.state = 'g';             // force gameplay (skip the fog-in animation)
 a.camX = 2.5; a.camZ = 1.5; a.yaw = 120; a.pitch = -5;   // place the camera
-a.setViewDist(4);          // how many sections deep the unfolding reaches (1–16)
+a.setViewDist(4);          // how many sections deep the unfolding reaches (4–16)
 a.regenerate();            // new maze, back to preview
 a.maze.solutionPath();     // list of cells from entrance to exit
 a._frames;                 // frame counter (cheap liveness check for tests)
