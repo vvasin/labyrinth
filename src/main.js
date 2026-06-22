@@ -19,6 +19,7 @@ function boot() {
 
   bindControls(app, {
     joystick: $('joystick'), joyNub: $('joy-nub'),
+    lookstick: $('lookstick'), lookNub: $('look-nub'),
     btnStart: $('btn-start'), btnGen: $('btn-gen'), btnGiveUp: $('btn-giveup'),
     btnPath: $('btn-path'), btnBigger: $('btn-bigger'), btnSmaller: $('btn-smaller'),
     dist: $('dist'), distVal: $('dist-val'), sizeVal: $('size-val'),

@@ -62,7 +62,7 @@ export function bindControls(app, dom) {
 
   // --- drag to look (mouse + touch) on the canvas ------------------------
   const canvas = app.canvas;
-  let dragId = null, lx = 0, ly = 0, joyId = null;
+  let dragId = null, lx = 0, ly = 0;
 
   canvas.addEventListener('pointerdown', (e) => {
     if (dragId !== null) return;
@@ -79,39 +79,24 @@ export function bindControls(app, dom) {
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
-  // --- on-screen movement joystick --------------------------------------
-  const joy = dom.joystick, nub = dom.joyNub;
-  const setJoy = (dx, dy) => {
-    const R = 42;
-    const len = Math.hypot(dx, dy);
-    if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
-    nub.style.transform = `translate(${dx}px, ${dy}px)`;
-    app.input.jx = dx / R;  // screen-right (dx>0) → strafe right (negative str)
-    app.input.jy = dy / R;  // screen-up (dy<0) → forward
-  };
-  joy.addEventListener('pointerdown', (e) => {
-    joyId = e.pointerId; joy.setPointerCapture(e.pointerId);
-    const rc = joy.getBoundingClientRect();
-    setJoy(e.clientX - (rc.left + rc.width / 2), e.clientY - (rc.top + rc.height / 2));
-    e.stopPropagation();
+  // --- on-screen joysticks (left = move, right = look) -------------------
+  // Both behave identically; only the input fields they drive differ. The nub
+  // follows the finger, clamped to radius R, reporting a normalised −1..1 vector.
+  bindJoystick(dom.joystick, dom.joyNub, (x, y) => {
+    app.input.jx = x;  // screen-right (x>0) → strafe right (negative str)
+    app.input.jy = y;  // screen-up (y<0) → forward
   });
-  joy.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== joyId) return;
-    const rc = joy.getBoundingClientRect();
-    setJoy(e.clientX - (rc.left + rc.width / 2), e.clientY - (rc.top + rc.height / 2));
+  bindJoystick(dom.lookstick, dom.lookNub, (x, y) => {
+    app.input.lx = x;  // screen-right (x>0) → turn right
+    app.input.ly = y;  // screen-up (y<0) → look up
   });
-  const endJoy = (e) => {
-    if (e.pointerId !== joyId) return;
-    joyId = null; nub.style.transform = 'translate(0,0)';
-    app.input.jx = app.input.jy = 0;
-  };
-  joy.addEventListener('pointerup', endJoy);
-  joy.addEventListener('pointercancel', endJoy);
 
   // --- buttons + sliders -------------------------------------------------
-  dom.btnStart.addEventListener('click', () => app.startGame());
-  dom.btnGen.addEventListener('click', () => app.regenerate());
-  dom.btnGiveUp.addEventListener('click', () => app.giveUp());
+  // The play actions live in the menu now; close it so the game is visible.
+  const closeMenu = () => dom.menu.classList.add('hidden');
+  dom.btnStart.addEventListener('click', () => { app.startGame(); closeMenu(); });
+  dom.btnGen.addEventListener('click', () => { app.regenerate(); closeMenu(); });
+  dom.btnGiveUp.addEventListener('click', () => { app.giveUp(); closeMenu(); });
   dom.btnPath.addEventListener('click', () => app.togglePath());
   dom.btnBigger.addEventListener('click', () => { app.resize(+1); syncUI(); });
   dom.btnSmaller.addEventListener('click', () => { app.resize(-1); syncUI(); });
@@ -139,4 +124,34 @@ export function bindControls(app, dom) {
   }
   syncUI();
   app._syncUI = syncUI;
+}
+
+// A round thumbstick: the nub tracks the active pointer (clamped to radius R) and
+// `onChange` receives the normalised offset (−1..1 on each axis), zeroed on release.
+function bindJoystick(joy, nub, onChange) {
+  const R = 42;
+  let id = null;
+  const set = (dx, dy) => {
+    const len = Math.hypot(dx, dy);
+    if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
+    nub.style.transform = `translate(${dx}px, ${dy}px)`;
+    onChange(dx / R, dy / R);
+  };
+  const track = (e) => {
+    const rc = joy.getBoundingClientRect();
+    set(e.clientX - (rc.left + rc.width / 2), e.clientY - (rc.top + rc.height / 2));
+  };
+  joy.addEventListener('pointerdown', (e) => {
+    id = e.pointerId; joy.setPointerCapture(e.pointerId);
+    track(e);
+    e.stopPropagation();
+  });
+  joy.addEventListener('pointermove', (e) => { if (e.pointerId === id) track(e); });
+  const end = (e) => {
+    if (e.pointerId !== id) return;
+    id = null; nub.style.transform = 'translate(0,0)';
+    onChange(0, 0);
+  };
+  joy.addEventListener('pointerup', end);
+  joy.addEventListener('pointercancel', end);
 }

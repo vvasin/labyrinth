@@ -22,6 +22,9 @@ const FOVY = 65, RADIUS = 0.24;
 const FOG_NEAR_FRAC = 0.35;
 const SPOT_CUTOFF = Math.cos((35 * Math.PI) / 180), SPOT_EXP = 40, SPOT_ATTEN = 0.2;
 const MOVE_SPEED = 1.9, LOOK_SPEED = 0.22, ANIM_TIME = 1.0;
+// Degrees/second at full deflection of the look joystick (the continuous analogue
+// of LOOK_SPEED, which is the per-pixel rate for drag/arrow-key looking).
+const LOOK_RATE = 150;
 // First-person avatar: camX/camZ is the actor's body centre — the vertical yaw
 // axis and the collision point. The eye sits EYE_FWD in front of that axis (at
 // the actor's "eyes"), so the body never blocks the forward view yet stays
@@ -63,7 +66,7 @@ export class App {
     const s = loadSettings();
     this.viewDist = s.viewDist;
     this.unitFloorMesh = this.r.createMesh(buildUnitFloor());
-    this.input = { f: false, b: false, l: false, rt: false, jx: 0, jy: 0 };
+    this.input = { f: false, b: false, l: false, rt: false, jx: 0, jy: 0, lx: 0, ly: 0 };
     this.cheat = false;
     this.walkPhase = 0;
     this.animT = 0;
@@ -197,6 +200,17 @@ export class App {
     this.yaw -= dx * LOOK_SPEED;
   }
 
+  // Continuous look from the on-screen look joystick, applied per frame (the
+  // walk-joystick equivalent for the view). lx>0 deflects right → turn right;
+  // ly<0 (screen-up) → look up — matching drag-to-look and the arrow keys.
+  _look(dt) {
+    if (this.state !== 'g') return;
+    const i = this.input;
+    if (i.lx === 0 && i.ly === 0) return;
+    this.yaw += i.lx * LOOK_RATE * dt;
+    this.pitch = Math.max(-90, Math.min(90, this.pitch - i.ly * LOOK_RATE * dt));
+  }
+
   _move(dt) {
     this.moving = false;
     if (this.state !== 'g') return;
@@ -226,6 +240,7 @@ export class App {
       if (this.animT >= 1) this._enterPreview();
     }
     this._move(dt);
+    this._look(dt);
     // Head bob: the camera rides the avatar's gait while walking and eases back
     // to rest when stopped, so the eye stays "attached" to the head.
     const target = this.moving ? Math.abs(Math.sin(this.walkPhase)) * BOB_AMP : 0;
