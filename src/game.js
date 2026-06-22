@@ -154,12 +154,26 @@ export class App {
   // --- camera & movement --------------------------------------------------
   _parseMove() {
     const mz = this.maze, w = mz.wall, r = RADIUS;
-    const ix = this.camX | 0, iz = this.camZ | 0;
+    let ix = this.camX | 0, iz = this.camZ | 0;
     let t;
     t = Math.floor(this.camZ - r); if (w[t]?.[ix]) this.camZ = t + r + 1;
     t = Math.floor(this.camZ + r); if (w[t]?.[ix]) this.camZ = t - r;
     t = Math.floor(this.camX - r); if (w[iz]?.[t]) this.camX = t + r + 1;
     t = Math.floor(this.camX + r); if (w[iz]?.[t]) this.camX = t - r;
+    // Corner (diagonal) push-out: a wall cell touching the current cell only at a
+    // corner is missed by the axis checks above (it shares neither the row nor the
+    // column we test), so a diagonal approach lets the disc — and the body it
+    // carries — poke into it, glitching the view. Only the corner case is left
+    // here: if either orthogonal neighbour is a wall the axis push already cleared
+    // it. Push the disc radially out of any such corner it overlaps.
+    ix = this.camX | 0; iz = this.camZ | 0;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      if (!w[iz + sz]?.[ix + sx]) continue;                  // diagonal cell is open
+      if (w[iz]?.[ix + sx] || w[iz + sz]?.[ix]) continue;    // an axis face already handled it
+      const cx = sx < 0 ? ix : ix + 1, cz = sz < 0 ? iz : iz + 1; // shared grid corner
+      const dx = this.camX - cx, dz = this.camZ - cz, d = Math.hypot(dx, dz);
+      if (d < r && d > 1e-6) { this.camX = cx + (dx / d) * r; this.camZ = cz + (dz / d) * r; }
+    }
     if (ix === mz.m - 1 && iz === mz.n - 2) this._finish();
   }
 
@@ -345,15 +359,21 @@ export class App {
       if (level > 240) return;                 // stencil is 8-bit; keep well clear
       for (const child of node.children) {
         const d = child.portalDir;
-        // Distance from the eye to this portal's plane. When we're right in the
-        // doorway (closer than the near clip), the portal quad is entirely in
-        // front of the near plane and stamps nothing — masking would black out
-        // the whole cell beyond. So draw that cell UNMASKED at this level.
+        // Distance from the eye to this portal's plane. When the eye sits on the
+        // portal plane (closer than the near clip), the portal quad straddles the
+        // near plane and stamps nothing — masking would black out the cell beyond.
+        // So draw that cell UNMASKED at this level. This is the doorway directly
+        // ahead, but also a SIDE opening when you stand on a cell border: the
+        // portal there is to your side (not "forward"), yet its plane runs through
+        // the eye just the same, so gate on lateral containment (the eye is within
+        // the opening's span across the plane) rather than on facing it.
         const planeC = d.dj ? (d.dj === 1 ? child.portalVj + 1 : child.portalVj)
           : (d.di === 1 ? child.portalVi + 1 : child.portalVi);
         const planeDist = Math.abs((d.dj ? eyeX : eyeZ) - planeC);
-        const forward = d.dj * Math.sin(ya) - d.di * Math.cos(ya) > 0;
-        if (planeDist < NEAR_DOORWAY && forward) { render(child, level); continue; }
+        const within = d.dj
+          ? eyeZ > child.portalVi && eyeZ < child.portalVi + 1
+          : eyeX > child.portalVj && eyeX < child.portalVj + 1;
+        if (planeDist < NEAR_DOORWAY && within) { render(child, level); continue; }
 
         const q = wallQuad(child.portalVi, child.portalVj, child.portalDir);
         stamp(q, gl.EQUAL, level, gl.INCR);    // portal silhouette: level → level+1

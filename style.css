@@ -8,6 +8,11 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* Buttons, steppers and sliders: allow the tap but disable iOS double-tap
+   zoom, which otherwise fires when the controls are tapped in quick succession
+   and leaves the app stuck zoomed in. */
+button, input { touch-action: manipulation; }
+
 html, body {
   margin: 0;
   height: 100%;

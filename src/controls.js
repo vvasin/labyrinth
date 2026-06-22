@@ -3,6 +3,18 @@
 // nudges the App; the App owns game state.
 
 export function bindControls(app, dom) {
+  // --- iOS: kill native zoom --------------------------------------------
+  // Tapping the on-screen controls quickly triggers Safari's double-tap zoom,
+  // and a stray two-finger touch triggers pinch zoom; either leaves the app
+  // stuck zoomed with no way back, since the controls intercept the touches you
+  // would pinch out with. `touch-action: manipulation` on the controls (CSS)
+  // disables double-tap zoom while keeping taps; these block the pinch-zoom
+  // gesture events Safari fires outside the touch-action model. preventDefault
+  // here doesn't suppress taps/clicks (those are separate pointer/click events).
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  }
+
   // --- keyboard ----------------------------------------------------------
   const keymap = { KeyW: 'f', KeyS: 'b', KeyA: 'l', KeyD: 'rt' };
   window.addEventListener('keydown', (e) => {
