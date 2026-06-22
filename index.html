@@ -15,18 +15,17 @@
     <!-- Top bar: menu + transient hint -->
     <div id="topbar">
       <button id="menu-button" aria-label="Menu">≡</button>
-      <span id="hint">Drag to look · Space to enter · ≡ for options</span>
+      <span id="hint">Left stick moves · right stick looks · ≡ for options</span>
     </div>
 
     <!-- Movement joystick (bottom-left) -->
-    <div id="joystick" aria-label="Move"><div id="joy-nub"></div></div>
+    <div id="joystick" class="joystick" aria-label="Move"><div id="joy-nub" class="joy-nub"></div></div>
 
-    <!-- Action buttons (bottom-right) -->
-    <div id="actions">
-      <button id="btn-start" class="action">Enter ▶</button>
-      <button id="btn-giveup" class="action">Give up</button>
-      <button id="btn-path" class="action">Path</button>
-    </div>
+    <!-- Look joystick (bottom-right) -->
+    <div id="lookstick" class="joystick" aria-label="Look"><div id="look-nub" class="joy-nub"></div></div>
+
+    <!-- Overview Enter button: shown only in preview, in place of the joysticks -->
+    <button id="btn-start" class="overview-enter">Enter maze ▶</button>
   </div>
 
   <!-- Options overlay -->
@@ -37,6 +36,8 @@
         <button id="menu-close" aria-label="Close">✕</button>
       </header>
 
+      <button id="btn-giveup" class="menu-item">Give up</button>
+      <button id="btn-path" class="menu-item">Reveal path</button>
       <button id="btn-gen" class="menu-item">Generate new maze</button>
 
       <section class="menu-section">
@@ -66,8 +67,8 @@
 
       <section class="menu-section help">
         <h3>Controls</h3>
-        <p><b>Look:</b> drag the view (or arrow keys)</p>
-        <p><b>Move:</b> on-screen stick (or W A S D)</p>
+        <p><b>Move:</b> left stick (or W A S D)</p>
+        <p><b>Look:</b> right stick, or drag the view (or arrow keys)</p>
         <p><b>Enter / give up:</b> Space / R · <b>New maze:</b> G</p>
         <p><b>Reveal path:</b> Alt+P · <b>View distance:</b> in options (4–16)</p>
         <p>Reach the green exit. Every wall is a mirror.</p>
