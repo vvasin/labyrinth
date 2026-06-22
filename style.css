@@ -6,12 +6,17 @@
   --text: #e8e8f0;
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-/* Buttons, steppers and sliders: allow the tap but disable iOS double-tap
-   zoom, which otherwise fires when the controls are tapped in quick succession
-   and leaves the app stuck zoomed in. */
-button, input { touch-action: manipulation; }
+/* touch-action is NOT inherited, so it must be set on every element a finger can
+   land on — not just the buttons. `manipulation` keeps taps, panning and the
+   menu's scroll working but disables iOS double-tap-to-zoom; without it a tap
+   landing a pixel off a button (on a container or the gap between buttons) hits
+   an `auto` element and zooms. The canvas and joystick opt into `none` below as
+   they drive their own drag gestures. */
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
 
 html, body {
   margin: 0;
@@ -22,7 +27,8 @@ html, body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: none;
+  /* touch-action stays `manipulation` (from *) so an ancestor `none` can't block
+     the options panel's touch scroll; the canvas/joystick set `none` themselves. */
 }
 
 #app {

@@ -7,7 +7,8 @@ export function bindControls(app, dom) {
   // Tapping the on-screen controls quickly triggers Safari's double-tap zoom,
   // and a stray two-finger touch triggers pinch zoom; either leaves the app
   // stuck zoomed with no way back, since the controls intercept the touches you
-  // would pinch out with. `touch-action: manipulation` on the controls (CSS)
+  // would pinch out with. `touch-action: manipulation` (CSS, on every element —
+  // it isn't inherited, so containers and the gaps between buttons need it too)
   // disables double-tap zoom while keeping taps; these block the pinch-zoom
   // gesture events Safari fires outside the touch-action model. preventDefault
   // here doesn't suppress taps/clicks (those are separate pointer/click events).
