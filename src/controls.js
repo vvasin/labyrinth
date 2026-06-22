@@ -7,14 +7,37 @@ export function bindControls(app, dom) {
   // Tapping the on-screen controls quickly triggers Safari's double-tap zoom,
   // and a stray two-finger touch triggers pinch zoom; either leaves the app
   // stuck zoomed with no way back, since the controls intercept the touches you
-  // would pinch out with. `touch-action: manipulation` (CSS, on every element —
-  // it isn't inherited, so containers and the gaps between buttons need it too)
-  // disables double-tap zoom while keeping taps; these block the pinch-zoom
-  // gesture events Safari fires outside the touch-action model. preventDefault
-  // here doesn't suppress taps/clicks (those are separate pointer/click events).
+  // would pinch out with. `touch-action: manipulation` (CSS) is supposed to stop
+  // double-tap zoom, but iOS Safari ignores it on some elements/versions, so we
+  // also guard it here. Pinch: cancel Safari's gesture events outright.
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
     document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
   }
+  // Double-tap: a single-finger tap within ~300ms of the last is the zoom
+  // gesture. Cancelling its touchend default stops the zoom — but that also
+  // suppresses the synthetic click, so re-fire it on the tapped element (a
+  // synthetic, non-trusted click) and swallow the real one if it still slips
+  // through, so the control fires exactly once and never zooms. The canvas runs
+  // its own pointer-based look gesture (and doesn't zoom), so it's left alone.
+  let lastTap = 0, eatRealClickUntil = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = Date.now(), dt = now - lastTap;
+    lastTap = now;
+    if (dt < 0 || dt > 300 || e.touches.length || e.target === app.canvas) return;
+    e.preventDefault();
+    const el = e.target;
+    if (el && el.tagName !== 'INPUT' && typeof el.click === 'function') {
+      eatRealClickUntil = now + 700;
+      el.click();
+    }
+  }, { passive: false });
+  document.addEventListener('click', (e) => {
+    if (e.isTrusted && Date.now() < eatRealClickUntil) {
+      eatRealClickUntil = 0;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }
+  }, true);
 
   // --- keyboard ----------------------------------------------------------
   const keymap = { KeyW: 'f', KeyS: 'b', KeyA: 'l', KeyD: 'rt' };
