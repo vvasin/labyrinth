@@ -12,19 +12,36 @@
 const DIR_INIT = 0, DIR_LEFT = 1, DIR_UP = 2, DIR_RIGHT = 3, DIR_DOWN = 4;
 const TYPE_NORMAL = 0, TYPE_REVERSE = 1, TYPE_BACKWARD = 2;
 
+// Tiny deterministic PRNG (mulberry32): a 32-bit seed reproduces the exact same
+// maze, so a session can be persisted as just {N, M, p, q, seed} and rebuilt.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export class Maze {
   constructor() {
     this.N = 10;
     this.M = 10;
     this.p = 0.5; // chance to pick a fresh direction at each step (twistiness)
     this.q = 0.5; // chance to spawn an extra branch at each step (branchiness)
+    this.seed = 0;
+    this._rng = Math.random;
   }
 
   get n() { return 2 * this.N + 1; }
   get m() { return 2 * this.M + 1; }
 
-  generate(N = this.N, M = this.M, p = this.p, q = this.q) {
-    this.N = N; this.M = M; this.p = p; this.q = q;
+  // All randomness in generation flows through `_rng`, seeded here, so the maze
+  // is a pure function of (N, M, p, q, seed).
+  generate(N = this.N, M = this.M, p = this.p, q = this.q,
+    seed = (Math.random() * 0xFFFFFFFF) >>> 0) {
+    this.N = N; this.M = M; this.p = p; this.q = q; this.seed = seed >>> 0;
+    this._rng = mulberry32(this.seed);
     const n = this.n, m = this.m;
 
     this.wall = Array.from({ length: n }, () => new Int8Array(m).fill(1));
@@ -94,10 +111,10 @@ export class Maze {
           const moves = this._getMoves(tmp, TYPE_NORMAL);
           if (moves.length) {
             for (let i = 0; i < moves.length - 1; i++) {
-              if (Math.random() < this.q) this._addTask(tmp.posx, tmp.posy, DIR_INIT);
+              if (this._rng() < this.q) this._addTask(tmp.posx, tmp.posy, DIR_INIT);
             }
-            if (tmp.dir === DIR_INIT || !moves.includes(tmp.dir) || Math.random() < this.p) {
-              tmp.dir = moves[(Math.random() * moves.length) | 0];
+            if (tmp.dir === DIR_INIT || !moves.includes(tmp.dir) || this._rng() < this.p) {
+              tmp.dir = moves[(this._rng() * moves.length) | 0];
             }
             this._move(tmp);
           } else {
@@ -116,7 +133,7 @@ export class Maze {
   _tryConnect(t) {
     const moves = this._getMoves(t, TYPE_REVERSE);
     if (moves.length) {
-      t.dir = moves[(Math.random() * moves.length) | 0];
+      t.dir = moves[(this._rng() * moves.length) | 0];
       this._move(t);
     }
   }
@@ -156,18 +173,43 @@ export class Maze {
     this.wall[n - 2][m - 1] = 0; // open the exit
   }
 
-  // Solution path as a list of cells, from the entrance room out through the exit.
-  solutionPath() {
+  // Path of cells from an arbitrary open cell (x=row=i, y=col=j) out to the exit,
+  // chasing `next`. Returns [] if the cell isn't on a solved route.
+  pathFrom(x, y) {
     const path = [];
-    let cell = { x: 1, y: 1 };
+    let cell = { x, y };
     const seen = new Set();
     while (cell) {
       const key = cell.x * 10000 + cell.y;
       if (seen.has(key)) break;
       seen.add(key);
       path.push(cell);
-      cell = this.next[cell.x][cell.y];
+      cell = this.next[cell.x] ? this.next[cell.x][cell.y] : null;
     }
     return path;
+  }
+
+  // Solution path as a list of cells, from the entrance room out through the exit.
+  solutionPath() { return this.pathFrom(1, 1); }
+
+  // Room cells (odd i, odd j) that are dead ends: open, with exactly one open
+  // neighbour. The start room (1,1) and the room before the exit are excluded so
+  // hints never land on the route's own endpoints.
+  deadEnds() {
+    const w = this.wall, n = this.n, m = this.m, out = [];
+    for (let i = 1; i < n; i += 2) {
+      for (let j = 1; j < m; j += 2) {
+        if (w[i][j]) continue;
+        if (i === 1 && j === 1) continue;
+        if (i === n - 2 && j === m - 2) continue;
+        let open = 0;
+        if (!w[i - 1][j]) open++;
+        if (!w[i + 1][j]) open++;
+        if (!w[i][j - 1]) open++;
+        if (!w[i][j + 1]) open++;
+        if (open === 1) out.push({ x: i, y: j });
+      }
+    }
+    return out;
   }
 }

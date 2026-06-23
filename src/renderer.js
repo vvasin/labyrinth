@@ -22,7 +22,7 @@ const UNIFORMS = [
   'uProj', 'uMV', 'uNormalMat',
   'uAmbient', 'uLight0Dir', 'uLight0Color',
   'uSpotOn', 'uSpotColor', 'uSpotCutoff', 'uSpotExp', 'uSpotAtten',
-  'uBaseColor', 'uSpecColor', 'uShininess', 'uEmission', 'uAlpha', 'uUnlit',
+  'uBaseColor', 'uSpecColor', 'uShininess', 'uEmission', 'uAlpha', 'uUnlit', 'uPathFlow',
   'uUseTex', 'uTex',
   'uFogOn', 'uFogColor', 'uFogStart', 'uFogEnd',
   'uResolution', 'uTime',
@@ -126,6 +126,7 @@ export class Renderer {
     gl.uniform1f(u.uShininess, mat.shininess || 0);
     gl.uniform1f(u.uAlpha, mat.alpha === undefined ? 1 : mat.alpha);
     gl.uniform1f(u.uUnlit, mat.unlit ? 1 : 0);
+    gl.uniform1f(u.uPathFlow, mat.pathFlow ? 1 : 0);
     gl.uniform1f(u.uUseTex, mat.tex ? 1 : 0);
     if (mat.tex) {
       gl.activeTexture(gl.TEXTURE0);

@@ -1,24 +1,15 @@
-// Input wiring: keyboard (desktop), on-screen buttons + sliders, a drag-to-look
-// gesture on the canvas, and a touch joystick for movement. All of it just
-// nudges the App; the App owns game state.
+// Input wiring: keyboard (desktop), on-screen buttons, the size-preset chooser,
+// a drag-to-look gesture on the canvas, and two touch joysticks. Everything just
+// nudges the App; the App owns game state. Actions are gated by state so no key
+// or button ever performs something undeclared for the screen you're on.
+
+import { STATE, SIZE_PRESETS } from './game.js';
 
 export function bindControls(app, dom) {
   // --- iOS: kill native zoom --------------------------------------------
-  // Tapping the on-screen controls quickly triggers Safari's double-tap zoom,
-  // and a stray two-finger touch triggers pinch zoom; either leaves the app
-  // stuck zoomed with no way back, since the controls intercept the touches you
-  // would pinch out with. `touch-action: manipulation` (CSS) is supposed to stop
-  // double-tap zoom, but iOS Safari ignores it on some elements/versions, so we
-  // also guard it here. Pinch: cancel Safari's gesture events outright.
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
     document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
   }
-  // Double-tap: a single-finger tap within ~300ms of the last is the zoom
-  // gesture. Cancelling its touchend default stops the zoom — but that also
-  // suppresses the synthetic click, so re-fire it on the tapped element (a
-  // synthetic, non-trusted click) and swallow the real one if it still slips
-  // through, so the control fires exactly once and never zooms. The canvas runs
-  // its own pointer-based look gesture (and doesn't zoom), so it's left alone.
   let lastTap = 0, eatRealClickUntil = 0;
   document.addEventListener('touchend', (e) => {
     const now = Date.now(), dt = now - lastTap;
@@ -39,17 +30,36 @@ export function bindControls(app, dom) {
     }
   }, true);
 
+  // --- size-preset chooser (initial state) ------------------------------
+  for (const preset of SIZE_PRESETS) {
+    const b = document.createElement('button');
+    b.className = 'preset';
+    b.innerHTML = `<span class="preset-label">${preset.label}</span>` +
+      `<span class="preset-size">${preset.n}×${preset.n}</span>`;
+    b.addEventListener('click', () => app.newGame(preset.n));
+    dom.presets.appendChild(b);
+  }
+
   // --- keyboard ----------------------------------------------------------
   const keymap = { KeyW: 'f', KeyS: 'b', KeyA: 'l', KeyD: 'rt' };
   window.addEventListener('keydown', (e) => {
     if (keymap[e.code]) { app.input[keymap[e.code]] = true; return; }
     switch (e.code) {
-      case 'Space': app.startGame(); break;
-      case 'KeyG': app.regenerate(); break;
-      case 'KeyR': app.giveUp(); break;
-      case 'KeyP': if (e.altKey) app.togglePath(); break;
-      case 'Equal': case 'NumpadAdd': app.resize(+1); syncUI(); break;
-      case 'Minus': case 'NumpadSubtract': app.resize(-1); syncUI(); break;
+      case 'Space':
+        if (app.state === STATE.GENERATED) app.startGame();
+        break;
+      case 'KeyR':
+        if (app.state === STATE.STARTED) app.surrender();
+        break;
+      case 'Escape':
+        if (app.state !== STATE.INITIAL) app.toInitial();
+        break;
+      case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': {
+        if (app.state !== STATE.INITIAL) break;
+        const preset = SIZE_PRESETS[+e.code.slice(-1) - 1];
+        if (preset) app.newGame(preset.n);
+        break;
+      }
       case 'ArrowUp': app.look(0, 10); break;
       case 'ArrowDown': app.look(0, -10); break;
       case 'ArrowLeft': app.look(10, 0); break;
@@ -63,7 +73,6 @@ export function bindControls(app, dom) {
   // --- drag to look (mouse + touch) on the canvas ------------------------
   const canvas = app.canvas;
   let dragId = null, lx = 0, ly = 0;
-
   canvas.addEventListener('pointerdown', (e) => {
     if (dragId !== null) return;
     dragId = e.pointerId; lx = e.clientX; ly = e.clientY;
@@ -71,7 +80,6 @@ export function bindControls(app, dom) {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerId !== dragId) return;
-    // Swipe right → turn right (see the right side), swipe up → look up.
     app.look(-(e.clientX - lx), -(e.clientY - ly));
     lx = e.clientX; ly = e.clientY;
   });
@@ -80,61 +88,56 @@ export function bindControls(app, dom) {
   canvas.addEventListener('pointercancel', endDrag);
 
   // --- on-screen joysticks (left = move, right = look) -------------------
-  // Both behave identically; only the input fields they drive differ. The nub
-  // follows the finger, clamped to radius R, reporting a normalised −1..1 vector.
-  bindJoystick(dom.joystick, dom.joyNub, (x, y) => {
-    app.input.jx = x;  // screen-right (x>0) → strafe right (negative str)
-    app.input.jy = y;  // screen-up (y<0) → forward
-  });
-  bindJoystick(dom.lookstick, dom.lookNub, (x, y) => {
-    app.input.lx = x;  // screen-right (x>0) → turn right
-    app.input.ly = y;  // screen-up (y<0) → look up
-  });
+  bindJoystick(dom.joystick, dom.joyNub, (x, y) => { app.input.jx = x; app.input.jy = y; });
+  bindJoystick(dom.lookstick, dom.lookNub, (x, y) => { app.input.lx = x; app.input.ly = y; });
 
-  // Preview has nothing to control, so swap the joysticks for a big Enter button.
-  app.onStateChange = (st) => document.body.classList.toggle('preview', st === 'p');
-
-  // --- buttons + sliders -------------------------------------------------
-  // Give up / path / generate live in the menu; close it so the game is visible.
+  // --- buttons -----------------------------------------------------------
   const closeMenu = () => dom.menu.classList.add('hidden');
   dom.btnStart.addEventListener('click', () => app.startGame());
-  dom.btnGen.addEventListener('click', () => { app.regenerate(); closeMenu(); });
-  dom.btnGiveUp.addEventListener('click', () => { app.giveUp(); closeMenu(); });
-  dom.btnPath.addEventListener('click', () => app.togglePath());
-  dom.btnBigger.addEventListener('click', () => { app.resize(+1); syncUI(); });
-  dom.btnSmaller.addEventListener('click', () => { app.resize(-1); syncUI(); });
+  dom.btnRegen.addEventListener('click', () => { app.toInitial(); closeMenu(); });
+  dom.btnGiveUp.addEventListener('click', () => { app.surrender(); closeMenu(); });
+  dom.btnRestart.addEventListener('click', () => { app.toInitial(); closeMenu(); });
 
   dom.dist.addEventListener('input', () => { app.setViewDist(+dom.dist.value); syncUI(); });
-  dom.pSlider.addEventListener('change', () => {
-    app.adjustParam('p', +dom.pSlider.value - app.maze.p); syncUI();
-  });
-  dom.qSlider.addEventListener('change', () => {
-    app.adjustParam('q', +dom.qSlider.value - app.maze.q); syncUI();
-  });
 
-  // menu open/close
   dom.menuBtn.addEventListener('click', () => dom.menu.classList.toggle('hidden'));
   dom.menuClose.addEventListener('click', () => dom.menu.classList.add('hidden'));
+
+  // --- reflect app → UI --------------------------------------------------
+  // Body class drives per-state visibility (see style.css). Also set the
+  // result verdict and any context-specific copy.
+  const STATES = Object.values(STATE);
+  app.onStateChange = (st) => {
+    for (const s of STATES) document.body.classList.toggle(`state-${s}`, s === st);
+    if (st === STATE.FINISHED || st === STATE.SURRENDERED) {
+      const win = st === STATE.FINISHED;
+      dom.result.classList.toggle('win', win);
+      dom.result.classList.toggle('lose', !win);
+      dom.resultTitle.textContent = win ? 'You escaped!' : 'You gave up';
+      dom.resultSub.textContent = win
+        ? 'The full path from start to exit is lit below.'
+        : 'Here you stood — the glowing line shows the way you missed.';
+    }
+    if (st !== STATE.INITIAL) closeMenu();
+  };
+
+  app.onHud = ({ hintsLeft, revealMs }) => {
+    const parts = [`Hints: ${hintsLeft}`];
+    if (revealMs > 0) parts.push(`path ${Math.ceil(revealMs / 1000)}s`);
+    dom.hintHud.textContent = parts.join(' · ');
+  };
 
   function syncUI() {
     dom.dist.value = app.viewDist;
     dom.distVal.textContent = app.viewDist;
-    dom.sizeVal.textContent = `${app.maze.N}×${app.maze.M}`;
-    dom.pSlider.value = app.maze.p;
-    dom.qSlider.value = app.maze.q;
-    dom.pVal.textContent = app.maze.p.toFixed(1);
-    dom.qVal.textContent = app.maze.q.toFixed(1);
   }
   syncUI();
+  app.onStateChange(app.state);
   app._syncUI = syncUI;
 }
 
-// A round thumbstick: the nub tracks the active pointer (clamped to radius R) and
-// `onChange` receives the normalised offset (−1..1 on each axis), zeroed on release.
-// The reported magnitude is shaped non-linearly — the unit direction is scaled by
-// t² (t = linear deflection 0..1) — so near the centre small moves barely change
-// the speed (fine aim) while the difference grows toward the edge. The nub itself
-// still follows the finger linearly; only the speed it reports is curved.
+// A round thumbstick: nub tracks the pointer (clamped to radius R); `onChange`
+// gets the normalised offset shaped by t² for fine aim near the centre.
 function bindJoystick(joy, nub, onChange) {
   const R = 42;
   let id = null;
@@ -142,8 +145,8 @@ function bindJoystick(joy, nub, onChange) {
     const len = Math.hypot(dx, dy);
     if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
     nub.style.transform = `translate(${dx}px, ${dy}px)`;
-    const nx = dx / R, ny = dy / R, t = Math.hypot(nx, ny); // t = deflection 0..1
-    onChange(nx * t, ny * t); // |(nx,ny)·t| = t² → quadratic response
+    const nx = dx / R, ny = dy / R, t = Math.hypot(nx, ny);
+    onChange(nx * t, ny * t);
   };
   const track = (e) => {
     const rc = joy.getBoundingClientRect();

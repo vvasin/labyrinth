@@ -20,11 +20,12 @@ function boot() {
   bindControls(app, {
     joystick: $('joystick'), joyNub: $('joy-nub'),
     lookstick: $('lookstick'), lookNub: $('look-nub'),
-    btnStart: $('btn-start'), btnGen: $('btn-gen'), btnGiveUp: $('btn-giveup'),
-    btnPath: $('btn-path'), btnBigger: $('btn-bigger'), btnSmaller: $('btn-smaller'),
-    dist: $('dist'), distVal: $('dist-val'), sizeVal: $('size-val'),
-    pSlider: $('p-slider'), qSlider: $('q-slider'),
-    pVal: $('p-val'), qVal: $('q-val'),
+    presets: $('size-presets'),
+    btnStart: $('btn-start'), btnRegen: $('btn-regen'),
+    btnGiveUp: $('btn-giveup'), btnRestart: $('btn-restart'),
+    hintHud: $('hint-hud'),
+    result: $('result-overlay'), resultTitle: $('result-title'), resultSub: $('result-sub'),
+    dist: $('dist'), distVal: $('dist-val'),
     menuBtn: $('menu-button'), menu: $('menu-overlay'), menuClose: $('menu-close'),
   });
 

@@ -56,6 +56,7 @@ uniform float uShininess;
 uniform vec3 uEmission;
 uniform float uAlpha;
 uniform float uUnlit;       // 1.0 → emit uBaseColor flat (path line)
+uniform float uPathFlow;    // 1.0 → glowing pulse travelling along U toward the exit
 
 uniform float uUseTex;
 uniform sampler2D uTex;
@@ -90,6 +91,25 @@ void main() {
 
   if (uUnlit > 0.5) {
     gl_FragColor = vec4(pow(albedo, vec3(0.4545)), uAlpha);
+    return;
+  }
+
+  // Hint path: a glowing emissive ribbon with a pulse flowing along its length
+  // (U = arc distance from the player) toward the exit. Unlike the flat cheat
+  // line it is NOT reflected (drawn in the real frame) and IS dimmed by fog, so
+  // it fades into the corridors like real geometry rather than floating on top.
+  if (uPathFlow > 0.5) {
+    float wave = 0.5 + 0.5 * sin(vUV.x * 5.0 - uTime * 4.5);
+    float across = smoothstep(0.0, 0.4, vUV.y) * smoothstep(1.0, 0.6, vUV.y);
+    vec3 c = uEmission * (0.7 + 1.3 * wave) + uBaseColor * 0.3;
+    c *= 0.35 + 0.65 * across;            // soft feathered edges across the ribbon
+    c = pow(clamp(c, 0.0, 1.0), vec3(0.4545));
+    if (uFogOn > 0.5) {
+      float d = length(vEye);
+      float f = clamp((uFogEnd - d) / (uFogEnd - uFogStart), 0.0, 1.0);
+      c = mix(uFogColor, c, f);
+    }
+    gl_FragColor = vec4(c, uAlpha);
     return;
   }
 
