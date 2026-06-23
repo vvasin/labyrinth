@@ -306,6 +306,8 @@ html, body {
   padding: 0 18px;
   text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
 }
+/* Centre the sub-paragraph block (max-width alone would leave it left-hugging). */
+#result-banner p { margin-left: auto; margin-right: auto; }
 #btn-restart {
   position: absolute;
   left: 50%;
