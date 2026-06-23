@@ -49,7 +49,7 @@ export function bindControls(app, dom) {
         if (app.state === STATE.GENERATED) app.startGame();
         break;
       case 'KeyR':
-        if (app.state === STATE.STARTED) app.surrender();
+        if (app.state === STATE.STARTED) askGiveUp();
         break;
       case 'Escape':
         if (app.state !== STATE.INITIAL) app.toInitial();
@@ -93,9 +93,14 @@ export function bindControls(app, dom) {
 
   // --- buttons -----------------------------------------------------------
   const closeMenu = () => dom.menu.classList.add('hidden');
+  // Give up is destructive (it ends the run), so confirm before surrendering.
+  const askGiveUp = () => { if (app.state === STATE.STARTED) dom.confirm.classList.remove('hidden'); };
+  const closeConfirm = () => dom.confirm.classList.add('hidden');
   dom.btnStart.addEventListener('click', () => app.startGame());
   dom.btnRegen.addEventListener('click', () => { app.toInitial(); closeMenu(); });
-  dom.btnGiveUp.addEventListener('click', () => { app.surrender(); closeMenu(); });
+  dom.btnGiveUp.addEventListener('click', askGiveUp);
+  dom.confirmYes.addEventListener('click', () => { closeConfirm(); app.surrender(); });
+  dom.confirmNo.addEventListener('click', closeConfirm);
   dom.btnRestart.addEventListener('click', () => { app.toInitial(); closeMenu(); });
 
   dom.dist.addEventListener('input', () => { app.setViewDist(+dom.dist.value); syncUI(); });
@@ -109,14 +114,15 @@ export function bindControls(app, dom) {
   const STATES = Object.values(STATE);
   app.onStateChange = (st) => {
     for (const s of STATES) document.body.classList.toggle(`state-${s}`, s === st);
+    if (st !== STATE.STARTED) closeConfirm();
     if (st === STATE.FINISHED || st === STATE.SURRENDERED) {
       const win = st === STATE.FINISHED;
       dom.result.classList.toggle('win', win);
       dom.result.classList.toggle('lose', !win);
       dom.resultTitle.textContent = win ? 'You escaped!' : 'You gave up';
       dom.resultSub.textContent = win
-        ? 'The full path from start to exit is lit below.'
-        : 'Here you stood — the glowing line shows the way you missed.';
+        ? 'The full path from start to exit is traced below.'
+        : 'Here you stood — the line traces the way out you missed.';
     }
     if (st !== STATE.INITIAL) closeMenu();
   };

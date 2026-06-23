@@ -81,19 +81,50 @@ html, body {
   box-shadow: 0 0 16px rgba(79, 227, 255, 0.4);
 }
 
-#hint {
-  font-size: 12px;
+/* Right-side minor action in the top bar (new maze / give up): same size and
+   neutral weight as the menu button, pushed to the opposite edge. */
+.top-btn {
+  pointer-events: auto;
+  margin-left: auto;
+  height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--btn);
+  color: var(--text);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  transition: background 0.15s;
+}
+.top-btn:active { background: var(--btn-active); }
+.top-btn.danger { border-color: rgba(255, 140, 140, 0.4); }
+.top-btn.danger:active { background: rgba(150, 50, 60, 0.6); }
+
+/* Hint HUD: centred on the top edge, independent of the flex row. */
+#hint-hud {
+  position: absolute;
+  left: 50%;
+  top: max(10px, env(safe-area-inset-top));
+  transform: translateX(-50%);
+  pointer-events: none;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
   letter-spacing: 0.02em;
-  opacity: 0.78;
+  color: var(--accent);
   background: rgba(8, 12, 20, 0.5);
   border: 1px solid var(--border);
-  padding: 6px 11px;
+  padding: 0 14px;
   border-radius: 999px;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* --- joysticks (left = move, right = look) --- */
@@ -209,39 +240,7 @@ html, body {
   align-items: center;
 }
 
-/* --- top-bar give-up action + hint HUD (gameplay) --- */
-.top-action {
-  pointer-events: auto;
-  margin-left: auto;
-  padding: 0 16px;
-  height: 44px;
-  font-size: 14px;
-  font-weight: 600;
-  border: 1px solid rgba(255, 140, 140, 0.4);
-  border-radius: 12px;
-  background: rgba(80, 28, 34, 0.55);
-  color: var(--text);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-.top-action:active { background: rgba(150, 50, 60, 0.6); }
-
-#hint-hud {
-  pointer-events: none;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--accent);
-  background: rgba(8, 12, 20, 0.5);
-  border: 1px solid var(--border);
-  padding: 6px 12px;
-  border-radius: 999px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  white-space: nowrap;
-}
-
-/* --- full-screen overlays (initial chooser + result) --- */
+/* --- full-screen overlays (initial chooser) --- */
 .overlay {
   position: absolute;
   inset: 0;
@@ -254,14 +253,14 @@ html, body {
 }
 .overlay > * { pointer-events: auto; }
 
-.hero h1, .verdict h1 {
+.hero h1, #result-banner h1 {
   margin: 0 0 10px;
   font-size: clamp(30px, 8vw, 52px);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-shadow: 0 0 24px rgba(79, 227, 255, 0.4);
 }
-.hero p, .verdict p {
+.hero p, #result-banner p {
   margin: 0 0 22px;
   font-size: 15px;
   opacity: 0.82;
@@ -291,17 +290,62 @@ html, body {
 .preset .preset-label { font-size: 16px; font-weight: 700; }
 .preset .preset-size { font-size: 12px; opacity: 0.7; }
 
-.result .verdict {
-  background: rgba(10, 14, 22, 0.6);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 28px 26px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+/* Result: a verdict banner above the map, a restart button below it. The map
+   (canvas) stays fully visible between them — no dialog covering the path. */
+#result-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#result-banner {
+  position: absolute;
+  top: max(64px, calc(env(safe-area-inset-top) + 56px));
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 0 18px;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
+}
+#btn-restart {
+  position: absolute;
+  left: 50%;
+  bottom: max(34px, calc(env(safe-area-inset-bottom) + 26px));
+  transform: translateX(-50%);
+  pointer-events: auto;
 }
 #result-overlay.win h1 { color: #6dffa6; text-shadow: 0 0 26px rgba(80, 255, 150, 0.5); }
 #result-overlay.lose h1 { color: #ff9a8a; text-shadow: 0 0 26px rgba(255, 120, 90, 0.4); }
+
+/* --- give-up confirmation --- */
+#confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#confirm-overlay.hidden { display: none; }
+.confirm-panel {
+  width: min(90vw, 340px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 22px;
+  text-align: center;
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+.confirm-panel p { margin: 0 0 18px; font-size: 16px; font-weight: 600; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
+.primary-btn.danger {
+  border-color: rgba(255, 140, 140, 0.5);
+  background: linear-gradient(135deg, rgba(200, 70, 70, 0.6), rgba(150, 45, 50, 0.65));
+  box-shadow: 0 0 22px rgba(220, 80, 80, 0.3), 0 4px 18px rgba(0, 0, 0, 0.4);
+  min-width: 0;
+}
 
 /* --- per-state visibility ---------------------------------------------- */
 #initial-overlay,
@@ -309,19 +353,19 @@ html, body {
 #generated-actions,
 #joystick,
 #lookstick,
-#hint,
 #hint-hud,
+#btn-regen,
 #btn-giveup { display: none; }
 
 body.state-initial #initial-overlay { display: flex; }
 body.state-generated #generated-actions { display: flex; }
+body.state-generated #btn-regen { display: inline-block; }
 body.state-started #joystick,
 body.state-started #lookstick { display: block; }
-body.state-started #hint,
-body.state-started #hint-hud { display: inline-block; }
+body.state-started #hint-hud { display: inline-flex; }
 body.state-started #btn-giveup { display: inline-block; }
 body.state-surrendered #result-overlay,
-body.state-finished #result-overlay { display: flex; }
+body.state-finished #result-overlay { display: block; }
 
 .menu-section {
   border-top: 1px solid rgba(255, 255, 255, 0.1);

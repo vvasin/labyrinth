@@ -454,7 +454,9 @@ export class App {
     r.setMaterial({ ...FLOOR_MAT, tex: this.tex.floor });
     r.drawMesh(this.floorMesh);
 
-    // Start / exit emblems, stamped flat on the floor at their room centres.
+    // Start / exit emblems, stamped flat on the floor on the border opening
+    // cells — one cell outside the start/exit rooms, where you actually enter
+    // and leave the maze.
     r.depthMask(false);
     const decal = (cx, cz, mat, tex) => {
       let m = M.translate(view, cx, 0.04, cz);
@@ -463,8 +465,8 @@ export class App {
       r.setMaterial({ ...mat, tex, emission: mat.emission, alpha: 1 });
       r.drawMesh(this.decalMesh);
     };
-    decal(1.5, 1.5, START_MAT, this.tex.start);
-    decal(mz.m - 1.5, mz.n - 1.5, END_MAT, this.tex.end);
+    decal(0.5, 1.5, START_MAT, this.tex.start);       // entrance border cell (1,0)
+    decal(mz.m - 0.5, mz.n - 1.5, END_MAT, this.tex.end); // exit border cell (n-2, m-1)
 
     // Review overlays: the path and the marker for where the player stands.
     if (this.reviewPathMesh) {

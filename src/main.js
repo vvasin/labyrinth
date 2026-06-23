@@ -23,6 +23,7 @@ function boot() {
     presets: $('size-presets'),
     btnStart: $('btn-start'), btnRegen: $('btn-regen'),
     btnGiveUp: $('btn-giveup'), btnRestart: $('btn-restart'),
+    confirm: $('confirm-overlay'), confirmYes: $('confirm-yes'), confirmNo: $('confirm-no'),
     hintHud: $('hint-hud'),
     result: $('result-overlay'), resultTitle: $('result-title'), resultSub: $('result-sub'),
     dist: $('dist'), distVal: $('dist-val'),

@@ -12,12 +12,13 @@
     <!-- Full-area GL canvas: the maze renders here; drag anywhere to look. -->
     <canvas id="glcanvas"></canvas>
 
-    <!-- Top bar: menu, a state hint, plus the play-time HUD + give-up action -->
+    <!-- Top bar: menu (left), centred play HUD, and a right-side minor action
+         (new maze when viewing the map, give up while playing) -->
     <div id="topbar">
       <button id="menu-button" aria-label="Menu">≡</button>
-      <span id="hint">Left stick moves · right stick looks · ≡ for options</span>
       <span id="hint-hud" aria-live="polite"></span>
-      <button id="btn-giveup" class="top-action">Give up</button>
+      <button id="btn-regen" class="top-btn">↺ New maze</button>
+      <button id="btn-giveup" class="top-btn danger">Give up</button>
     </div>
 
     <!-- Movement joystick (bottom-left) — gameplay only -->
@@ -26,9 +27,8 @@
     <!-- Look joystick (bottom-right) — gameplay only -->
     <div id="lookstick" class="joystick" aria-label="Look"><div id="look-nub" class="joy-nub"></div></div>
 
-    <!-- Generated map: enter the maze, or start over with a new size -->
+    <!-- Generated map: enter the maze (new-maze lives in the top bar) -->
     <div id="generated-actions" class="bottom-bar">
-      <button id="btn-regen" class="ghost-btn">↺ New maze</button>
       <button id="btn-start" class="primary-btn">Enter maze ▶</button>
     </div>
 
@@ -41,12 +41,23 @@
       </div>
     </div>
 
-    <!-- Surrendered / finished: a verdict + the path, with a way to restart -->
-    <div id="result-overlay" class="overlay result">
-      <div class="verdict">
+    <!-- Surrendered / finished: a verdict above the map, a restart below it -->
+    <div id="result-overlay">
+      <div id="result-banner">
         <h1 id="result-title"></h1>
         <p id="result-sub"></p>
-        <button id="btn-restart" class="primary-btn">Play again ▶</button>
+      </div>
+      <button id="btn-restart" class="primary-btn">Play again ▶</button>
+    </div>
+
+    <!-- Give-up confirmation -->
+    <div id="confirm-overlay" class="hidden">
+      <div class="confirm-panel" role="dialog" aria-label="Confirm give up">
+        <p>Give up and see the way out?</p>
+        <div class="confirm-actions">
+          <button id="confirm-no" class="ghost-btn">Keep going</button>
+          <button id="confirm-yes" class="primary-btn danger">Give up</button>
+        </div>
       </div>
     </div>
   </div>
