@@ -101,15 +101,19 @@ html, body {
   transition: background 0.15s;
 }
 .top-btn:active { background: var(--btn-active); }
-.top-btn.danger { border-color: rgba(255, 140, 140, 0.4); }
+.top-btn.danger {
+  border-color: rgba(255, 140, 140, 0.4);
+  background: rgba(80, 28, 34, 0.6);
+}
 .top-btn.danger:active { background: rgba(150, 50, 60, 0.6); }
 
-/* Hint HUD: centred on the top edge, independent of the flex row. */
+/* Hint HUD: centred on the top bar (its own absolute offset would otherwise
+   stack on top of #topbar's, dropping it below the button row). */
 #hint-hud {
   position: absolute;
   left: 50%;
-  top: max(10px, env(safe-area-inset-top));
-  transform: translateX(-50%);
+  top: 50%;
+  transform: translate(-50%, -50%);
   pointer-events: none;
   height: 44px;
   display: inline-flex;

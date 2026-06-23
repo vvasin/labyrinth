@@ -68,8 +68,11 @@ const END_MAT = { base: [0.32, 0.95, 0.5], emission: [0.16, 0.8, 0.4], spec: [0.
 // the map reads clearly as carved-out corridors. The floor texture is reused but
 // dimmed almost to black.
 const PLATE_MAT = { base: [0.06, 0.07, 0.11], spec: [0.1, 0.12, 0.18], shininess: 8 };
-// Floating hint gem + the "you are here" marker on the review maps.
+// Floating hint gem + the "you are here" marker on the review maps. Used gems
+// fade to a dim grey so the review map shows where every hint sat and which
+// were collected.
 const HINT_MAT = { base: [0.25, 0.85, 1.0], emission: [0.2, 0.75, 1.0], spec: [1, 1, 1], shininess: 80, alpha: 0.95 };
+const HINT_USED_MAT = { base: [0.45, 0.48, 0.56], emission: [0.1, 0.11, 0.14], spec: [0.4, 0.45, 0.55], shininess: 30, alpha: 0.7 };
 const YOU_MAT = { base: [1.0, 0.85, 0.3], emission: [1.0, 0.7, 0.15], spec: [1, 1, 1], shininess: 40, alpha: 0.95 };
 // The reveal ribbon's flowing pulse (see shaders.js uPathFlow).
 const PATH_MAT = { base: [0.1, 0.28, 0.5], emission: [0.25, 0.9, 1.2], pathFlow: true, alpha: 0.95 };
@@ -483,6 +486,20 @@ export class App {
       r.drawMesh(this.decalMesh);
     }
     r.depthMask(true);
+
+    // On the review maps, show where every hint sat — bright cyan if untouched,
+    // faded grey once collected — as little floating gems above the path.
+    if (this.state === STATE.SURRENDERED || this.state === STATE.FINISHED) {
+      const t = performance.now() * 0.001;
+      for (const h of this.hints) {
+        let m = M.translate(view, h.j + 0.5, 0.18, h.i + 0.5);
+        m = M.rotateY(m, t * 50);
+        m = M.scale(m, 0.18, 0.18, 0.18);
+        r.setMatrices(proj, m);
+        r.setMaterial(h.used ? HINT_USED_MAT : HINT_MAT);
+        r.drawMesh(this.hintMesh);
+      }
+    }
   }
 
   // First-person: the recursive portal unfolding (mirror walls).
