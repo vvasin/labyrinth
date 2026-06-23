@@ -32,6 +32,11 @@ import * as M from './mat4.js';
 
 const PI = Math.PI;
 
+// Eye-to-portal-plane distance under which the eye counts as standing IN the
+// opening (the doorway case). Mirrors game.js's NEAR_DOORWAY: a portal you are
+// standing in occludes nothing, so the cell beyond keeps the full view sector.
+const NEAR_DOORWAY = 0.12;
+
 // Four grid directions as (dj, di) world steps. j = column = X, i = row = Z.
 const DIRS = [
   { dj: 1, di: 0 },   // +X
@@ -83,7 +88,12 @@ function portalInterval(fwdAng, ex, ez, e1, e2) {
 
 // Unfold the maze around the camera.
 //
-// params: { maze, camX, camZ, yaw, viewDist, fovy, aspect, margin?, maxSections? }
+// params: { maze, camX, camZ, yaw, viewDist, fovy, aspect,
+//           eyeX?, eyeZ?, pitch?, margin?, minHalf?, maxSections? }
+//   eyeX/eyeZ default to camX/camZ; the walk starts from (and the sector is measured at)
+//   the eye, which sits a touch ahead of the body. pitch widens the sector when looking
+//   up/down. minHalf forces a wider initial half-sector than the FOV implies (the game
+//   passes π/2 — a 180° forward hemisphere; see below).
 // returns:
 //   visits — every side considered, in depth-first order, each with kind
 //     ('start'|'opening'|'wall'), drawn flag, cull reason (null|'angle'|
@@ -95,7 +105,7 @@ function portalInterval(fwdAng, ex, ez, e1, e2) {
 export function unfoldSections(p) {
   const {
     maze, camX, camZ, yaw,
-    viewDist = 6, fovy = 65, aspect = 1, margin = 0, maxSections = 5000,
+    viewDist = 6, fovy = 65, aspect = 1, margin = 0, minHalf = 0, maxSections = 5000,
   } = p;
   const wall = maze.wall;
   // The body cell (camX,camZ) is what `hasBody` keys on, but the VIEWPOINT — and
@@ -111,15 +121,22 @@ export function unfoldSections(p) {
   const fwdAng = Math.atan2(-Math.cos(ya), Math.sin(ya)); // forward = (sin, -cos)
   // Horizontal half-FOV widens with pitch: looking down (or up) the screen spans
   // a wider range of world azimuths (at straight down, all of them). Take the
-  // widest frustum-corner azimuth for this pitch, plus a little slack — portals
-  // narrow the sector again almost immediately, so erring wide is cheap.
+  // widest frustum-corner azimuth for this pitch as the pitch-driven minimum.
   const fh = Math.atan(Math.tan((fovy * PI) / 360) * aspect);
   const tv = Math.tan((fovy * PI) / 360);
   const pp = Math.abs((pitch * PI) / 180), tf = Math.tan(fh);
-  const half = Math.min(margin + 0.12 + Math.max(
+  const pitchWiden = 0.12 + Math.max(
     Math.atan2(tf, Math.cos(pp) - tv * Math.sin(pp)),
     Math.atan2(tf, Math.cos(pp) + tv * Math.sin(pp)),
-  ), PI * 0.98);
+  );
+  // `minHalf` lets a caller force a generously wide initial sector regardless of
+  // the true (screen-aspect-dependent) horizontal FOV. The game passes PI/2 — a
+  // full 180° forward hemisphere — because the exact FOV is awkward to reproduce
+  // on wide screens and barely matters: each portal narrows the sector sharply at
+  // the very first step, so a wide start only avoids wrongly culling sections
+  // that are actually on screen. Pitch can still widen it past 180° (toward a
+  // full circle) when looking steeply up or down.
+  const half = Math.min(margin + Math.max(minHalf, pitchWiden), PI * 0.98);
   const isWall = (ri, rj) => (wall[ri] ? wall[ri][rj] : 1) !== 0; // out of bounds → wall
 
   const visits = [];  // every side considered (incl. culled), depth-first
@@ -161,11 +178,27 @@ export function unfoldSections(p) {
       // mirror on the parent, so the player never sees the void behind it.
       const cullSolid = () => { if (wallHere) s.solidWalls.push({ dir, vi: s.vi, vj: s.vj }); };
 
+      // If the eye sits IN this opening — on its plane and laterally within its
+      // span — you are standing in the doorway: it occludes nothing, so the cell
+      // beyond keeps the FULL parent sector instead of being narrowed to the
+      // portal's span. On a cell border the eye lies exactly on the side edge's
+      // line, where that span degenerates to a ~180° arc and the intersection
+      // below collapses, wrongly culling everything seen through the doorway (the
+      // border-blackout bug). The mirror renderer draws this same case unmasked
+      // (game.js NEAR_DOORWAY); matching it here is what generates the subtree it
+      // then draws.
+      const planeC = dir.dj ? (dir.dj === 1 ? s.vj + 1 : s.vj)
+        : (dir.di === 1 ? s.vi + 1 : s.vi);
+      const planeDist = Math.abs((dir.dj ? ex : ez) - planeC);
+      const within = dir.dj ? (ez > s.vi && ez < s.vi + 1) : (ex > s.vj && ex < s.vj + 1);
+      const inDoorway = !wallHere && planeDist < NEAR_DOORWAY && within;
+
       const [e1, e2] = edgeEndpoints(s.vi, s.vj, dir);
       const span = portalInterval(fwdAng, ex, ez, e1, e2);
       // The view sector is forward-facing and never wraps; an edge whose arc
       // straddles the rear simply fails to overlap it and is culled here.
-      const lo = Math.max(sector[0], span[0]), hi = Math.min(sector[1], span[1]);
+      const lo = inDoorway ? sector[0] : Math.max(sector[0], span[0]);
+      const hi = inDoorway ? sector[1] : Math.min(sector[1], span[1]);
       if (lo >= hi) { node.drawn = false; node.cull = 'angle'; cullSolid(); continue; }
       if (dist > viewDist) { node.drawn = false; node.cull = 'distance'; cullSolid(); continue; }
       const k = vkey(nvi, nvj);

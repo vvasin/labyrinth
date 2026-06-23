@@ -256,15 +256,13 @@ export class App {
     const preview = this.state === 'p';
     // Sync the fog to the view distance so the world dissolves into fog exactly
     // where the section walk stops drawing cells — geometry never pops in/out at
-    // the recursion boundary. The cull is radial (distance to the cell) while fog
-    // is by forward depth, so on a wide screen a diagonal sight-line reaches a
-    // touch farther than a straight-ahead one; that's the intended corner case.
-    // The cull drops a cell when its CENTRE passes `viewDist`, but that cell's
-    // near wall edge is up to half a cell closer (forward depth ≈ viewDist-0.5).
-    // So fog must reach full half a cell BEFORE the cull radius — otherwise the
-    // near edge is still semi-transparent when its cell is dropped and the wall
-    // snaps out. (Fog is by forward depth while the cull is radial, so on a wide
-    // screen a diagonal sight-line fades a touch later — the intended corner case.)
+    // the recursion boundary. Both the cull and the fog (see shaders.js) are now
+    // RADIAL — distance from the eye — so they agree in every direction, on any
+    // aspect ratio. The cull drops a cell when its CENTRE passes `viewDist`, but
+    // that cell's near wall is up to half a cell closer, so fog must reach full
+    // half a cell BEFORE the cull radius (viewDist - 0.5) — otherwise the near
+    // edge is still semi-transparent when its cell is dropped and the wall snaps
+    // out.
     let fogColor = preview ? [0, 0, 0] : FOG_TINT.slice(), fogOn = !preview;
     let fogEnd = this.viewDist - 0.5, fogStart = this.viewDist * FOG_NEAR_FRAC;
     if (this.state === 's') { fogStart *= this.animT; fogEnd *= this.animT; }
@@ -341,6 +339,11 @@ export class App {
     const { root } = unfoldSections({
       maze: mz, camX: this.camX, camZ: this.camZ, yaw: this.yaw, pitch: this.pitch,
       eyeX, eyeZ, viewDist: this.viewDist, fovy: FOVY, aspect,
+      // A full 180° forward hemisphere as the initial sector (see unfoldSections):
+      // the true horizontal FOV is awkward to reproduce on wide screens and the
+      // first portal narrows the sector anyway, so a wide start just avoids
+      // wrongly culling on-screen sections.
+      minHalf: Math.PI / 2,
     });
 
     const sI = 1, sJ = 1;                 // start room cell

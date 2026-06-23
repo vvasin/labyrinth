@@ -28,10 +28,11 @@ You start with a **top-down preview** of the whole maze and its solution path. P
 | Reveal the solution path | **Path** | Alt + P |
 | New maze | menu → *Generate* | G |
 | Maze size | menu → *Maze size* | + / − |
-| Mirror reflection depth | menu → *Mirror depth* | 0–4 |
+| View distance (reflection depth) | menu → *View distance* (4–16) | — |
 
 Maze **twistiness** and **branchiness** (the original's `p`/`q` generation parameters),
-size, and mirror depth live in the **≡ menu** and persist across reloads.
+size, and **view distance** (how many sections deep the mirror recursion reaches, which sets
+the reflection depth) live in the **≡ menu** and persist across reloads.
 
 ## Layout
 
@@ -40,17 +41,19 @@ index.html, style.css     entry point + mobile-first UI
 src/                       app source (ES modules)
   mat4.js                  matrix / vector / clip-plane math
   maze.js                  maze generation + solution pathfinding
-  shaders.js               GLSL (two lights, fog, texture, shader clip planes)
-  renderer.js              WebGL context, program, textures, GL-state wrappers
-  scene.js                 floor / marker geometry + visible-mirror finder
-  mirrors.js               the recursive stencil-buffer mirror renderer
+  shaders.js               GLSL (key light + flashlight, radial fog, texturing, clip planes)
+  renderer.js              WebGL context, program, texture upload, GL-state wrappers
+  scene.js                 floor + marker geometry, unit floor tile, mirror-wall quad
+  textures.js              procedural floor / mirror / start / end textures
+  unfold.js                recursive portal unfolding of the maze across its mirrors
   mech.js                  the player avatar (seen in reflections)
-  game.js                  state machine, camera, collision, render loop
+  game.js                  state machine, camera, collision, render loop, mirror stencil pass
   controls.js              keyboard / pointer / touch input
   persistence.js           localStorage settings
   main.js                  bootstrap
 scripts/serve.js           zero-dependency static dev server
-textures/                  floor / mirror / start / end (original BMPs)
+textures/                  original floor / mirror / start / end BMPs (kept; no longer used —
+                           textures are now procedural, see src/textures.js)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the rendering model and the non-obvious decisions behind

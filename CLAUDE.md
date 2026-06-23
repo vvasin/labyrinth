@@ -69,12 +69,17 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
   fills `next[i][j]` pointing toward the exit). Grid is (2N+1)×(2M+1); index `i`=row=world Z,
   `j`=col=world X.
 - `src/shaders.js` — GLSL. One program: ambient + a directional key light + a
-  camera-mounted **spotlight (the flashlight)**, linear fog, optional texturing, material
-  emission (the coloured markers), and up to `MAX_CLIP` shader clip planes (the section
-  renderer leaves these off, but they stay available). All lighting is in **eye space**.
-- `src/renderer.js` — WebGL context, the shader program, texture loading (BMP decodes in
-  the browser via `<img>`; we redraw onto a power-of-two canvas so WebGL 1.0 can mipmap +
-  REPEAT), mesh buffers, an immediate-mode `drawQuad` (one scratch buffer, for wall
+  camera-mounted **spotlight (the flashlight)**, **radial** linear fog (by distance from the
+  eye, so it matches the radial section cull), optional texturing, material emission (the
+  coloured markers), and up to `MAX_CLIP` shader clip planes (the section renderer leaves
+  these off, but they stay available). All lighting is in **eye space**.
+- `src/textures.js` — the **procedural** floor / mirror / start / end textures, drawn onto
+  power-of-two canvases at runtime (replacing the original hand-painted BMPs — no binary
+  assets, crisp at any resolution, tuned to the shader's gamma/tonemap pipeline).
+- `src/renderer.js` — WebGL context, the shader program, texture upload
+  (`textureFromCanvas`, used for the procedural textures; a `loadTexture` URL/BMP path also
+  exists but is currently unused — both redraw onto a power-of-two canvas so WebGL 1.0 can
+  mipmap + REPEAT), mesh buffers, an immediate-mode `drawQuad` (one scratch buffer, for wall
   quads), and thin **GL-state wrappers named after the C calls** (`colorMask`, `depthMask`,
   `cullFace`, `enableCull`).
 - `src/scene.js` — static geometry: the full preview floor; a single **unit floor tile**
@@ -124,6 +129,16 @@ eye in unfolded space), a **distance** bound (`viewDist`, in section units), and
 mirrors. The result is a tree (`root`) plus a flat depth-first `visits` log and a `draws`
 list sorted far → near.
 
+The **initial** sector is deliberately wide — the game passes `minHalf = π/2`, a full 180°
+forward hemisphere, rather than the true horizontal FOV (which is awkward to reproduce from
+the aspect ratio and would wrongly cull on-screen sections on wide screens); the first portal
+narrows it sharply anyway, so erring wide is cheap. One special case: when the eye sits **in**
+an opening — on its plane and laterally within it (a cell border, the `NEAR_DOORWAY` test the
+renderer also uses) — that portal occludes nothing, so the cell beyond keeps the **full**
+parent sector instead of being narrowed to the portal's (then-degenerate ~180°) span. Without
+that, an eye exactly on a border collapses the sector through the doorway and blacks out
+everything seen through it.
+
 `game.js`'s `_renderSections` walks the tree with the **stencil buffer** (this is the
 original `DrawMirrors` structure, now with the sector/distance/cycle filters it lacked). For
 each child: increment the stencil inside the portal's silhouette (`EQUAL level` → `level+1`),
@@ -161,9 +176,11 @@ software-renderer / mobile perf and the 8-bit stencil depth at the high end.
 
 Eye-space. Ambient + a directional key light (its world direction is transformed by the
 view each frame) + a positional **spotlight at the camera** aimed down −Z (cutoff 35°,
-exponent 40, linear attenuation) that gives the dim corridors their flashlight look. Linear
-fog (black in play; ramps in on entry, white-out on finish). Two-sided shading (`N` flipped
-toward the viewer) because reflected/inside-out faces are common.
+exponent 40, linear attenuation) that gives the dim corridors their flashlight look.
+**Radial** linear fog (by distance from the eye, not forward depth, so it dissolves the far
+walls evenly in every direction and stays synced to the radial section cull — dark tint in
+play, ramps in on entry, white-out on finish). Two-sided shading (`N` flipped toward the
+viewer) because reflected/inside-out faces are common.
 
 ## How the port diverges from the C (all intentional)
 
