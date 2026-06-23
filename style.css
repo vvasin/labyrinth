@@ -226,8 +226,6 @@ html, body {
 }
 .ghost-btn:active, .top-btn:active, #menu-button:active,
 .preset:active, .menu-head button:active { transform: scale(0.96); }
-/* btn-restart is also a .primary-btn but stays centred while pressed. */
-#btn-restart:active { transform: translateX(-50%) scale(0.96); }
 
 .ghost-btn {
   padding: 13px 20px;
@@ -303,31 +301,32 @@ html, body {
 .preset .preset-label { font-size: 16px; font-weight: 700; }
 .preset .preset-size { font-size: 12px; opacity: 0.7; }
 
-/* Result: a verdict banner above the map, a restart button below it. The map
-   (canvas) stays fully visible between them — no dialog covering the path. */
+/* Result: verdict above the map, restart below it — the map (canvas) stays
+   fully visible, no dialog over the path. Portrait stacks them top/bottom; the
+   landscape rules below move the whole panel into a left column beside the map. */
 #result-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-#result-banner {
+#result-panel {
   position: absolute;
-  top: max(64px, calc(env(safe-area-inset-top) + 56px));
-  left: 0;
-  right: 0;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(64px, calc(env(safe-area-inset-top) + 56px)) 18px
+           max(34px, calc(env(safe-area-inset-bottom) + 26px));
+  pointer-events: none;
+}
+#result-banner {
   text-align: center;
-  padding: 0 18px;
   text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
 }
 /* Centre the sub-paragraph block (max-width alone would leave it left-hugging). */
 #result-banner p { margin-left: auto; margin-right: auto; }
-#btn-restart {
-  position: absolute;
-  left: 50%;
-  bottom: max(34px, calc(env(safe-area-inset-bottom) + 26px));
-  transform: translateX(-50%);
-  pointer-events: auto;
-}
+#btn-restart { pointer-events: auto; }
 #result-overlay.win h1 { color: #6dffa6; text-shadow: 0 0 26px rgba(80, 255, 150, 0.5); }
 #result-overlay.lose h1 { color: #ff9a8a; text-shadow: 0 0 26px rgba(255, 120, 90, 0.4); }
 
@@ -414,3 +413,38 @@ body.state-finished #result-overlay { display: block; }
   text-align: center;
   background: #100; color: #fbb;
 }
+
+/* --- landscape: map on the right, controls in a left column ------------
+   In landscape the top-down map is framed by HEIGHT, so it fills the screen
+   vertically and there is no room for a banner above / button below without
+   overlapping it. Instead, shrink the map to the right and stack the relevant
+   controls in a left column. The renderer reframes the maze to the canvas's new
+   size (a ResizeObserver triggers the resize), so nothing overflows or overlaps.
+   Initial (no map) and started (full-screen first person) are left untouched. */
+@media (orientation: landscape) {
+  body.state-generated #glcanvas,
+  body.state-surrendered #glcanvas,
+  body.state-finished #glcanvas { left: 38%; width: 62%; }
+
+  body.state-generated #generated-actions,
+  body.state-surrendered #result-panel,
+  body.state-finished #result-panel {
+    inset: 0 auto 0 0;
+    width: 38%;
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+    padding: max(60px, calc(env(safe-area-inset-top) + 8px)) 22px 22px
+             max(22px, env(safe-area-inset-left));
+    transform: none;
+    overflow: auto;
+  }
+  #result-banner h1 { font-size: clamp(24px, 4.4vw, 44px); }
+  /* Let the action buttons fit a narrow column instead of overflowing it. */
+  body.state-generated #btn-start,
+  body.state-surrendered #btn-restart,
+  body.state-finished #btn-restart { width: 100%; min-width: 0; max-width: 300px; }
+}
+
+/* Never let an overlay's content run off-screen on very short windows. */
+.overlay { overflow: auto; }

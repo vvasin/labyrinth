@@ -66,6 +66,12 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
   chooser** overlay, the **generated** action bar (enter / new maze), and the **result**
   overlay (surrendered / finished verdict + play-again). Visibility is driven entirely by a
   `body.state-<name>` class set from `App.onStateChange`. `dvh` + safe-area insets.
+  Responsive: in **portrait** the map fills the width with the generated/result
+  controls stacked above/below it; in **landscape** the map (framed by height,
+  so it fills the screen vertically) shrinks to a right-hand column and the
+  controls move into a left column — driven by CSS, with a `ResizeObserver` in
+  `game.js` reframing the maze to the canvas's new size. Nothing overlaps or
+  overflows at any width.
 - `src/mat4.js` — column-major 4×4/3×3 matrix helpers. Each `*` helper **post-multiplies**,
   so chaining reproduces the GL matrix-stack order. `transformPlane` emulates `glClipPlane`
   (plane → eye space via inverse-transpose of the modelview).

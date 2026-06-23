@@ -116,7 +116,11 @@ export class App {
 
     this._dpr = Math.min(window.devicePixelRatio || 1, 2);
     this._resize();
-    window.addEventListener('resize', () => this._resize());
+    // The canvas size can change from a window resize OR from a state-driven CSS
+    // layout change (e.g. the landscape map shrinks to a right-hand column); a
+    // ResizeObserver catches both and reframes the maze.
+    if (window.ResizeObserver) new ResizeObserver(() => this._resize()).observe(this.canvas);
+    else window.addEventListener('resize', () => this._resize());
     // Persist on the way out (tab hide / close) so an interrupted game resumes.
     const flush = () => this._save();
     window.addEventListener('pagehide', flush);
@@ -686,6 +690,11 @@ export class App {
   _resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
+    // Idempotent: the observer can fire on every layout tick, so skip if the
+    // drawing-buffer size is unchanged (re-allocating it each frame would be
+    // wasteful and would flicker the cleared buffer).
+    const bw = Math.round(w * this._dpr), bh = Math.round(h * this._dpr);
+    if (bw === this.canvas.width && bh === this.canvas.height) return;
     this.r.resize(w, h, this._dpr);
   }
 }

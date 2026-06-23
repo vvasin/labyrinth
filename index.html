@@ -41,13 +41,16 @@
       </div>
     </div>
 
-    <!-- Surrendered / finished: a verdict above the map, a restart below it -->
+    <!-- Surrendered / finished: a verdict + restart. Portrait stacks them above
+         and below the map; landscape moves them into a left column beside it. -->
     <div id="result-overlay">
-      <div id="result-banner">
-        <h1 id="result-title"></h1>
-        <p id="result-sub"></p>
+      <div id="result-panel">
+        <div id="result-banner">
+          <h1 id="result-title"></h1>
+          <p id="result-sub"></p>
+        </div>
+        <button id="btn-restart" class="primary-btn">Play again ▶</button>
       </div>
-      <button id="btn-restart" class="primary-btn">Play again ▶</button>
     </div>
 
     <!-- Give-up confirmation -->
