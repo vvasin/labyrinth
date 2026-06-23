@@ -149,6 +149,26 @@ test('the walk starts from the eye cell, not the body cell', () => {
   assert.equal(root.hasBody, false, 'body rides (2,2), which is behind the eye here');
 });
 
+// --- standing in a doorway: the cell beyond keeps the full sector ------------
+// On a cell border the eye lies exactly on a side edge's line, so that portal
+// subtends a degenerate ~180° arc. If it narrowed the sector like an ordinary
+// portal, the intersection would collapse and everything seen through the
+// doorway would be culled → a black half-screen. Standing in the opening it must
+// occlude nothing, so the cell across it keeps expanding its own subtree.
+test('an opening the eye stands in does not narrow the sector (border blackout)', () => {
+  // Eye exactly on the +X border of (2,2)/(2,3), looking ALONG the border (+Z)
+  // so the doorway to the cell behind is to the side, on the eye's own plane.
+  const { root } = unfoldSections({
+    maze: ROOM, camX: 3.0, camZ: 2.5, yaw: 180, eyeX: 3.0, eyeZ: 2.5,
+    viewDist: 6, fovy: 90, aspect: 1,
+  });
+  assert.equal(root.vj, 3); // eye cell is (2,3)
+  const side = root.children.find((c) => c.vi === 2 && c.vj === 2);
+  assert.ok(side, 'the cell across the doorway is drawn');
+  assert.ok(side.children.length > 0,
+    'the doorway cell keeps expanding (its subtree is not sector-culled to a leaf)');
+});
+
 // --- the result is a tree whose drawn children carry their portal mask -------
 test('drawn sections form a tree; each child records the portal it is seen through', () => {
   const { root } = unfoldSections({

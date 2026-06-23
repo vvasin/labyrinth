@@ -147,9 +147,17 @@ void main() {
   // contract: fog is synced to the view distance and reaches full opacity right
   // at the cull radius, hiding the walls the section walk stopped drawing with
   // no visible seam at that boundary. uFogColor is therefore in display space.
+  //
+  // The distance used is RADIAL (length(vEye)), not forward depth (-vEye.z), to
+  // match the section cull, which is radial (distance from the eye to the cell).
+  // With forward-depth fog a diagonal sight-line on a wide screen reaches a wall
+  // whose forward depth is still short of uFogEnd — so it stays lit even though
+  // its cell is at the cull radius and nothing is drawn beyond it, leaving a
+  // bright wall edge against the void. Radial fog fades every direction at the
+  // same true distance, so those far walls dissolve instead.
   if (uFogOn > 0.5) {
-    float f = clamp((uFogEnd + vEye.z) / (uFogEnd - uFogStart), 0.0, 1.0);
-    // vEye.z is negative in front of the camera, so -vEye.z is the distance.
+    float dist = length(vEye);
+    float f = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     color = mix(uFogColor, color, f);
   }
 
