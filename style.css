@@ -81,19 +81,54 @@ html, body {
   box-shadow: 0 0 16px rgba(79, 227, 255, 0.4);
 }
 
-#hint {
-  font-size: 12px;
+/* Right-side minor action in the top bar (new maze / give up): same size and
+   neutral weight as the menu button, pushed to the opposite edge. */
+.top-btn {
+  pointer-events: auto;
+  margin-left: auto;
+  height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--btn);
+  color: var(--text);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  transition: background 0.15s;
+}
+.top-btn:active { background: var(--btn-active); }
+.top-btn.danger {
+  border-color: rgba(255, 140, 140, 0.4);
+  background: rgba(80, 28, 34, 0.6);
+}
+.top-btn.danger:active { background: rgba(150, 50, 60, 0.6); }
+
+/* Hint HUD: centred on the top bar (its own absolute offset would otherwise
+   stack on top of #topbar's, dropping it below the button row). */
+#hint-hud {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
   letter-spacing: 0.02em;
-  opacity: 0.78;
+  color: var(--accent);
   background: rgba(8, 12, 20, 0.5);
   border: 1px solid var(--border);
-  padding: 6px 11px;
+  padding: 0 14px;
   border-radius: 999px;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* --- joysticks (left = move, right = look) --- */
@@ -167,47 +202,184 @@ html, body {
   background: var(--btn); color: var(--text); font-size: 16px;
 }
 
-.menu-item {
-  display: block;
-  width: 100%;
-  padding: 13px;
-  margin-bottom: 10px;
-  font-size: 15px;
-  font-weight: 600;
-  border: none;
-  border-radius: 12px;
-  background: var(--btn);
-  color: var(--text);
-}
-.menu-item:active { background: var(--btn-active); }
-
-/* --- overview Enter button (preview only) --- */
-.overview-enter {
-  position: absolute;
-  left: 50%;
-  bottom: max(36px, calc(env(safe-area-inset-bottom) + 28px));
-  transform: translateX(-50%);
-  min-width: 200px;
-  padding: 16px 28px;
-  font-size: 18px;
+/* --- shared buttons --- */
+.primary-btn {
+  min-width: 180px;
+  padding: 15px 26px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--text);
   border: 1px solid rgba(120, 240, 190, 0.45);
   border-radius: 14px;
-  background: linear-gradient(135deg, rgba(60, 200, 140, 0.55), rgba(40, 150, 110, 0.6));
+  background: linear-gradient(135deg, rgba(60, 200, 140, 0.6), rgba(40, 150, 110, 0.65));
   box-shadow: 0 0 22px rgba(60, 220, 150, 0.35), 0 4px 18px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: transform 0.05s, box-shadow 0.15s;
-  display: none; /* shown only in preview (see body.preview below) */
 }
-.overview-enter:active { transform: translateX(-50%) scale(0.96); }
+.primary-btn:active { transform: scale(0.96); }
 
-/* Preview: nothing to drive, so hide the sticks and reveal the Enter button. */
-body.preview #joystick,
-body.preview #lookstick { display: none; }
-body.preview .overview-enter { display: block; }
+/* Consistent press feedback (slight shrink) across every button. */
+.ghost-btn, .top-btn, #menu-button, .preset, .menu-head button {
+  transition: transform 0.05s, background 0.15s, box-shadow 0.15s;
+}
+.ghost-btn:active, .top-btn:active, #menu-button:active,
+.preset:active, .menu-head button:active { transform: scale(0.96); }
+
+.ghost-btn {
+  padding: 13px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--btn);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.ghost-btn:active { background: var(--btn-active); }
+
+/* --- bottom action bar (generated state) --- */
+.bottom-bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(34px, calc(env(safe-area-inset-bottom) + 26px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* --- full-screen overlays (initial chooser) --- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  pointer-events: none;
+}
+.overlay > * { pointer-events: auto; }
+
+.hero h1, #result-banner h1 {
+  margin: 0 0 10px;
+  font-size: clamp(30px, 8vw, 52px);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 24px rgba(79, 227, 255, 0.4);
+}
+.hero p, #result-banner p {
+  margin: 0 0 22px;
+  font-size: 15px;
+  opacity: 0.82;
+  max-width: 30ch;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  max-width: 360px;
+  margin: 0 auto;
+}
+.preset {
+  padding: 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--btn);
+  color: var(--text);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.preset:active { background: var(--btn-active); }
+.preset .preset-label { font-size: 16px; font-weight: 700; }
+.preset .preset-size { font-size: 12px; opacity: 0.7; }
+
+/* Result: verdict above the map, restart below it — the map (canvas) stays
+   fully visible, no dialog over the path. Portrait stacks them top/bottom; the
+   landscape rules below move the whole panel into a left column beside the map. */
+#result-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#result-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(64px, calc(env(safe-area-inset-top) + 56px)) 18px
+           max(34px, calc(env(safe-area-inset-bottom) + 26px));
+  pointer-events: none;
+}
+#result-banner {
+  text-align: center;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
+}
+/* Centre the sub-paragraph block (max-width alone would leave it left-hugging). */
+#result-banner p { margin-left: auto; margin-right: auto; }
+#btn-restart { pointer-events: auto; }
+#result-overlay.win h1 { color: #6dffa6; text-shadow: 0 0 26px rgba(80, 255, 150, 0.5); }
+#result-overlay.lose h1 { color: #ff9a8a; text-shadow: 0 0 26px rgba(255, 120, 90, 0.4); }
+
+/* --- give-up confirmation --- */
+#confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#confirm-overlay.hidden { display: none; }
+.confirm-panel {
+  width: min(90vw, 340px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 22px;
+  text-align: center;
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+.confirm-panel p { margin: 0 0 18px; font-size: 16px; font-weight: 600; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
+.primary-btn.danger {
+  border-color: rgba(255, 140, 140, 0.5);
+  background: linear-gradient(135deg, rgba(200, 70, 70, 0.6), rgba(150, 45, 50, 0.65));
+  box-shadow: 0 0 22px rgba(220, 80, 80, 0.3), 0 4px 18px rgba(0, 0, 0, 0.4);
+  min-width: 0;
+}
+
+/* --- per-state visibility ---------------------------------------------- */
+#initial-overlay,
+#result-overlay,
+#generated-actions,
+#joystick,
+#lookstick,
+#hint-hud,
+#btn-regen,
+#btn-giveup { display: none; }
+
+body.state-initial #initial-overlay { display: flex; }
+body.state-generated #generated-actions { display: flex; }
+body.state-generated #btn-regen { display: inline-block; }
+body.state-started #joystick,
+body.state-started #lookstick { display: block; }
+body.state-started #hint-hud { display: inline-flex; }
+body.state-started #btn-giveup { display: inline-block; }
+body.state-surrendered #result-overlay,
+body.state-finished #result-overlay { display: block; }
 
 .menu-section {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -227,14 +399,6 @@ body.preview .overview-enter { display: block; }
 
 .setting input[type="range"] { width: 100%; accent-color: var(--accent); }
 
-.stepper { display: flex; gap: 8px; }
-.stepper button {
-  width: 38px; height: 32px;
-  border: none; border-radius: 8px;
-  background: var(--btn); color: var(--text); font-size: 18px;
-}
-.stepper button:active { background: var(--btn-active); }
-
 .help h3 { margin: 0 0 8px; font-size: 14px; }
 .help p { margin: 4px 0; font-size: 12.5px; opacity: 0.82; }
 .help b { color: var(--text); opacity: 1; }
@@ -249,3 +413,38 @@ body.preview .overview-enter { display: block; }
   text-align: center;
   background: #100; color: #fbb;
 }
+
+/* --- landscape: map on the right, controls in a left column ------------
+   In landscape the top-down map is framed by HEIGHT, so it fills the screen
+   vertically and there is no room for a banner above / button below without
+   overlapping it. Instead, shrink the map to the right and stack the relevant
+   controls in a left column. The renderer reframes the maze to the canvas's new
+   size (a ResizeObserver triggers the resize), so nothing overflows or overlaps.
+   Initial (no map) and started (full-screen first person) are left untouched. */
+@media (orientation: landscape) {
+  body.state-generated #glcanvas,
+  body.state-surrendered #glcanvas,
+  body.state-finished #glcanvas { left: 38%; width: 62%; }
+
+  body.state-generated #generated-actions,
+  body.state-surrendered #result-panel,
+  body.state-finished #result-panel {
+    inset: 0 auto 0 0;
+    width: 38%;
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+    padding: max(60px, calc(env(safe-area-inset-top) + 8px)) 22px 22px
+             max(22px, env(safe-area-inset-left));
+    transform: none;
+    overflow: auto;
+  }
+  #result-banner h1 { font-size: clamp(24px, 4.4vw, 44px); }
+  /* Let the action buttons fit a narrow column instead of overflowing it. */
+  body.state-generated #btn-start,
+  body.state-surrendered #btn-restart,
+  body.state-finished #btn-restart { width: 100%; min-width: 0; max-width: 300px; }
+}
+
+/* Never let an overlay's content run off-screen on very short windows. */
+.overlay { overflow: auto; }

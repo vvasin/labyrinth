@@ -112,17 +112,18 @@ async function main() {
       requestAnimationFrame(() => requestAnimationFrame(res))));
     const glErr = () => page.evaluate(() => window.__app.r.gl.getError());
 
-    // 1) preview draws the whole maze
+    // 1) the generated state draws the whole maze as a readable top-down map
+    await page.evaluate(() => window.__app.newGame(8));
     await settle();
     const prev = await page.evaluate(PIXELS);
-    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'preview.png') });
-    check('preview renders the maze', prev.nonblackFrac > 0.5 && prev.colors >= 8,
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'generated.png') });
+    check('generated map renders the maze', prev.nonblackFrac > 0.5 && prev.colors >= 8,
       `nonblack=${prev.nonblackFrac.toFixed(2)} colors=${prev.colors}`);
 
     // 2) first person at the entrance
     await page.evaluate(() => {
       const a = window.__app;
-      a.startGame(); a.state = 'g';
+      a.startGame(); a.animT = 1; // skip the fog-in
       a.camX = 1.5; a.camZ = 1.5; a.camY = 0.5; a.yaw = 90; a.pitch = 0;
       a.setViewDist(4);
     });
@@ -150,14 +151,16 @@ async function main() {
     check('view-distance sweep (4,8,16) stays clean', sweepOk,
       `last nonblack=${mid.nonblackFrac.toFixed(2)}`);
 
-    // 4) every state + lifecycle transition keeps the GL error register clean
+    // 4) every state + lifecycle transition keeps the GL error register clean.
+    // Reveal a hint mid-play too, so the flowing path ribbon is exercised.
     const states = {};
     for (const [name, fn] of [
-      ['transition_s', () => { const a = window.__app; a.startGame(); }],
-      ['gameplay_g', () => { window.__app.state = 'g'; window.__app.cheat = true; }],
-      ['finish_f', () => { window.__app.state = 'f'; window.__app.animT = 0.3; }],
-      ['regenerate', () => window.__app.regenerate()],
-      ['giveup', () => { const a = window.__app; a.startGame(); a.state = 'g'; a.giveUp(); }],
+      ['initial', () => window.__app.toInitial()],
+      ['generated', () => window.__app.newGame(12)],
+      ['started', () => { const a = window.__app; a.startGame(); a.animT = 1; }],
+      ['reveal', () => { const a = window.__app; const h = a.hints[0]; if (h) { a.camX = h.j + 0.5; a.camZ = h.i + 0.5; a._parseMove(); } }],
+      ['surrendered', () => window.__app.surrender()],
+      ['finished', () => { const a = window.__app; a.newGame(8); a.startGame(); a._finish(); }],
     ]) {
       await page.evaluate(fn);
       await settle();

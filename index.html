@@ -12,66 +12,81 @@
     <!-- Full-area GL canvas: the maze renders here; drag anywhere to look. -->
     <canvas id="glcanvas"></canvas>
 
-    <!-- Top bar: menu + transient hint -->
+    <!-- Top bar: menu (left), centred play HUD, and a right-side minor action
+         (new maze when viewing the map, give up while playing) -->
     <div id="topbar">
       <button id="menu-button" aria-label="Menu">≡</button>
-      <span id="hint">Left stick moves · right stick looks · ≡ for options</span>
+      <span id="hint-hud" aria-live="polite"></span>
+      <button id="btn-regen" class="top-btn">↺ New maze</button>
+      <button id="btn-giveup" class="top-btn danger">Give up</button>
     </div>
 
-    <!-- Movement joystick (bottom-left) -->
+    <!-- Movement joystick (bottom-left) — gameplay only -->
     <div id="joystick" class="joystick" aria-label="Move"><div id="joy-nub" class="joy-nub"></div></div>
 
-    <!-- Look joystick (bottom-right) -->
+    <!-- Look joystick (bottom-right) — gameplay only -->
     <div id="lookstick" class="joystick" aria-label="Look"><div id="look-nub" class="joy-nub"></div></div>
 
-    <!-- Overview Enter button: shown only in preview, in place of the joysticks -->
-    <button id="btn-start" class="overview-enter">Enter maze ▶</button>
+    <!-- Generated map: enter the maze (new-maze lives in the top bar) -->
+    <div id="generated-actions" class="bottom-bar">
+      <button id="btn-start" class="primary-btn">Enter maze ▶</button>
+    </div>
+
+    <!-- Initial: choose a size to generate -->
+    <div id="initial-overlay" class="overlay">
+      <div class="hero">
+        <h1>Labyrinth</h1>
+        <p>A maze where every wall is a mirror. Pick a size to begin.</p>
+        <div id="size-presets" class="presets"></div>
+      </div>
+    </div>
+
+    <!-- Surrendered / finished: a verdict + restart. Portrait stacks them above
+         and below the map; landscape moves them into a left column beside it. -->
+    <div id="result-overlay">
+      <div id="result-panel">
+        <div id="result-banner">
+          <h1 id="result-title"></h1>
+          <p id="result-sub"></p>
+        </div>
+        <button id="btn-restart" class="primary-btn">Play again ▶</button>
+      </div>
+    </div>
+
+    <!-- Give-up confirmation -->
+    <div id="confirm-overlay" class="hidden">
+      <div class="confirm-panel" role="dialog" aria-label="Confirm give up">
+        <p>Give up and see the way out?</p>
+        <div class="confirm-actions">
+          <button id="confirm-no" class="ghost-btn">Keep going</button>
+          <button id="confirm-yes" class="primary-btn danger">Give up</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Options overlay -->
   <div id="menu-overlay" class="hidden">
     <div id="menu-panel" role="dialog" aria-label="Options">
       <header class="menu-head">
-        <span>Labyrinth</span>
+        <span>Options</span>
         <button id="menu-close" aria-label="Close">✕</button>
       </header>
 
-      <button id="btn-giveup" class="menu-item">Give up</button>
-      <button id="btn-path" class="menu-item">Reveal path</button>
-      <button id="btn-gen" class="menu-item">Generate new maze</button>
-
       <section class="menu-section">
-        <div class="setting">
-          <span>Maze size <b id="size-val">10×10</b></span>
-          <span class="stepper">
-            <button id="btn-smaller">−</button>
-            <button id="btn-bigger">+</button>
-          </span>
-        </div>
-
         <label class="setting">
-          <span>View distance <b id="dist-val">4</b></span>
-          <input type="range" id="dist" min="4" max="16" step="1" value="4">
-        </label>
-
-        <label class="setting">
-          <span>Twistiness <b id="p-val">0.5</b></span>
-          <input type="range" id="p-slider" min="0" max="1" step="0.1" value="0.5">
-        </label>
-
-        <label class="setting">
-          <span>Branchiness <b id="q-val">0.5</b></span>
-          <input type="range" id="q-slider" min="0" max="1" step="0.1" value="0.5">
+          <span>View distance <b id="dist-val">6</b></span>
+          <input type="range" id="dist" min="4" max="16" step="1" value="6">
         </label>
       </section>
 
       <section class="menu-section help">
-        <h3>Controls</h3>
+        <h3>How to play</h3>
+        <p>Reach the green exit. Every wall is a mirror.</p>
         <p><b>Move:</b> left stick (or W A S D)</p>
         <p><b>Look:</b> right stick, or drag the view (or arrow keys)</p>
-        <p><b>Enter / give up:</b> Space / R · <b>New maze:</b> G</p>
-        <p><b>Reveal path:</b> Alt+P · <b>View distance:</b> in options (4–16)</p>
-        <p>Reach the green exit. Every wall is a mirror.</p>
+        <p><b>Hints:</b> glowing gems hide in dead ends — touch one to light the way out for a few seconds.</p>
+        <p><b>Keys:</b> Space starts · R gives up · Esc restarts</p>
       </section>
     </div>
   </div>

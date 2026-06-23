@@ -45,11 +45,14 @@ tests. The app exposes `window.__app` for introspection/control:
 
 ```js
 const a = window.__app;
-a.startGame();             // preview → first person
-a.state = 'g';             // force gameplay (skip the fog-in animation)
+a.newGame(8);              // generate an 8×8 maze → 'generated' state (top-down map)
+a.startGame();             // 'generated' → 'started' (first person at the entrance)
+a.animT = 1;               // skip the fog-in animation
+a.state;                   // 'initial' | 'generated' | 'started' | 'surrendered' | 'finished'
 a.camX = 2.5; a.camZ = 1.5; a.yaw = 120; a.pitch = -5;   // place the camera
 a.setViewDist(4);          // how many sections deep the unfolding reaches (4–16)
-a.regenerate();            // new maze, back to preview
+a.surrender();             // 'started' → 'surrendered' (review map)
+a.toInitial();             // back to the size chooser; clears the saved session
 a.maze.solutionPath();     // list of cells from entrance to exit
 a._frames;                 // frame counter (cheap liveness check for tests)
 ```
@@ -58,21 +61,34 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
 
 ## Files
 
-- `index.html` / `style.css` — mobile-first shell: full-area canvas, a top bar (menu +
-  hint), a movement joystick (bottom-left), action buttons (bottom-right), and the options
-  overlay. `dvh` + safe-area insets.
+- `index.html` / `style.css` — mobile-first shell: full-area canvas, a top bar (menu, state
+  hint, play HUD + give-up), the two movement/look joysticks, the initial **size-preset
+  chooser** overlay, the **generated** action bar (enter / new maze), and the **result**
+  overlay (surrendered / finished verdict + play-again). Visibility is driven entirely by a
+  `body.state-<name>` class set from `App.onStateChange`. `dvh` + safe-area insets.
+  Responsive: in **portrait** the map fills the width with the generated/result
+  controls stacked above/below it; in **landscape** the map (framed by height,
+  so it fills the screen vertically) shrinks to a right-hand column and the
+  controls move into a left column — driven by CSS, with a `ResizeObserver` in
+  `game.js` reframing the maze to the canvas's new size. Nothing overlaps or
+  overflows at any width.
 - `src/mat4.js` — column-major 4×4/3×3 matrix helpers. Each `*` helper **post-multiplies**,
   so chaining reproduces the GL matrix-stack order. `transformPlane` emulates `glClipPlane`
   (plane → eye space via inverse-transpose of the modelview).
 - `src/maze.js` — `Maze`: generation + solution pathfinding, a faithful port of
   `maze_module.c` (randomized carving with twistiness `p` / branchiness `q`, then a BFS that
   fills `next[i][j]` pointing toward the exit). Grid is (2N+1)×(2M+1); index `i`=row=world Z,
-  `j`=col=world X.
+  `j`=col=world X. Generation is **seeded** (a mulberry32 PRNG): the maze is a pure function
+  of `(N, M, p, q, seed)`, so a session persists as just those five numbers. Also exposes
+  `pathFrom(i,j)` (route from any cell to the exit) and `deadEnds()` (room cells with a single
+  opening — where hints are dropped).
 - `src/shaders.js` — GLSL. One program: ambient + a directional key light + a
   camera-mounted **spotlight (the flashlight)**, **radial** linear fog (by distance from the
   eye, so it matches the radial section cull), optional texturing, material emission (the
-  coloured markers), and up to `MAX_CLIP` shader clip planes (the section renderer leaves
-  these off, but they stay available). All lighting is in **eye space**.
+  coloured markers), a `uPathFlow` branch (the **hint reveal ribbon**: an emissive pulse that
+  flows along U toward the exit, fog-dimmed but never lit/reflected), and up to `MAX_CLIP`
+  shader clip planes (the section renderer leaves these off, but they stay available). All
+  lighting is in **eye space**.
 - `src/textures.js` — the **procedural** floor / mirror / start / end textures, drawn onto
   power-of-two canvases at runtime (replacing the original hand-painted BMPs — no binary
   assets, crisp at any resolution, tuned to the shader's gamma/tonemap pipeline).
@@ -82,9 +98,13 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
   mipmap + REPEAT), mesh buffers, an immediate-mode `drawQuad` (one scratch buffer, for wall
   quads), and thin **GL-state wrappers named after the C calls** (`colorMask`, `depthMask`,
   `cullFace`, `enableCull`).
-- `src/scene.js` — static geometry: the full preview floor; a single **unit floor tile**
-  (`buildUnitFloor`, one drawn per section); the red **start** and green **exit** markers;
-  the black finish box; the path polyline; and `wallQuad(vi,vj,dir)` — a mirror-wall quad in
+- `src/scene.js` — static geometry: the full floor; a single **unit floor tile**
+  (`buildUnitFloor`, one drawn per section); the red **start** and green **exit** markers; the
+  overview **base plate** (`buildPlate`, the dark wall slab the readable map's bright floor
+  channels sit on) and flat **decal** quad (`buildDecal`, the start/exit/you emblems on the
+  maps); the floating **hint gem** (`buildHint`, an octahedron drawn in the section pass so it
+  reflects); the **path ribbon** (`buildPathRibbon`, the reveal line — arc length in U for the
+  flowing pulse); the review path polyline; and `wallQuad(vi,vj,dir)` — a mirror-wall quad in
   unfolded ("virtual") world space.
 - `src/unfold.js` — **the heart**: `unfoldSections()`, the recursive portal walk that unfolds
   the maze across its mirrors into a *tree* of drawable sections. Pure (no GL); unit-tested.
@@ -92,13 +112,18 @@ The canvas uses `preserveDrawingBuffer`, so it can be read back via a 2D canvas 
 - `src/mech.js` — the player avatar, a box-built walker with a phase-driven gait. The
   original linked the 700-line `glutmech`; we keep only the role (something that reads right
   reflected) with a compact model. Drawn on the player's cell and its mirror images.
-- `src/game.js` — `App`: maze lifecycle, the camera, collision (`_parseMove`), the
-  preview→play→finish state machine, per-mode lighting, and the render loop — `_drawPreview`
-  (top-down, no walls) and `_renderSections` (the first-person unfolding). The desktop-only
-  frame recorder was dropped.
-- `src/controls.js` — keyboard, drag-to-look (pointer), the touch joystick, and the menu
-  wiring.
-- `src/persistence.js` — best-effort `localStorage` for size / `p` / `q` / view distance.
+- `src/game.js` — `App`: maze lifecycle, the camera, collision (`_parseMove`), the **five-state
+  user journey** (see below), the hint system, per-mode lighting, session persistence, and the
+  render loop — `_drawOverview` (the readable top-down map used by generated/surrendered/
+  finished) and `_renderSections` (the first-person unfolding) + `_drawReveal` (the hint
+  ribbon). Exports `STATE` and `SIZE_PRESETS`.
+- `src/controls.js` — keyboard, drag-to-look (pointer), the touch joysticks, the size-preset
+  buttons, and the per-state UI wiring (body class, result verdict, HUD). Every key/button is
+  gated by state so it only does what the current screen declares.
+- `src/persistence.js` — best-effort `localStorage`: durable **settings** (last size, view
+  distance) plus a resumable **session** (maze as `{N,M,p,q,seed}`, state, camera position,
+  surrender point, and hint layout incl. the absolute end-time of an active reveal so the
+  countdown continues — never resets — across a reload).
 - `scripts/serve.js` — zero-dependency static dev server (sets ESM + `.bmp` MIME types).
 
 ## The section renderer (`unfold.js` + `game.js`) — read before touching rendering
@@ -164,12 +189,22 @@ software-renderer / mobile perf and the 8-bit stencil depth at the high end.
   translate(-cam)`; projection = `perspective(55°)·translate(0,0,-0.7)` (the small shove is
   from the original). Collision (`_parseMove`) pushes the camera out of wall cells using a
   `RADIUS` = 0.24 disc, then checks the exit cell.
-- **States**: `p` preview (top-down, full-bright, no fog/flashlight, solution path shown) →
-  `s` fog-in transition → `g` gameplay (flashlight + fog) → `f` white-out finish flash →
-  back to `p`. The original's longer GLUT scenario animations are compressed to short timed
-  transitions.
-- The **entrance cell `[1][0]`** is opened only during the render pass (so the portal walk
-  treats it as a passage) and restored after, so the entrance isn't itself a mirror —
+- **States** (`STATE` in `game.js`) — the user journey, each persisted so a reload resumes
+  in place:
+  - `initial` — no maze drawn; the size-preset chooser overlay invites a `newGame(n)`.
+  - `generated` — the readable **top-down map** (`_drawOverview`: dark wall plate + bright
+    floor channels + start/exit emblems, no path, no mirrors). Enter (`startGame`) or restart
+    (`toInitial`).
+  - `started` — first person. The camera spawns at the entrance facing the first open passage;
+    a one-second fog-in (`animT`) ramps the fog/flashlight. Reach the exit → `finished`; give
+    up → `surrendered`. Hints (glowing gems in dead ends) are picked up by walking onto them
+    and reveal the path from your cell for `REVEAL_MS`.
+  - `surrendered` — the map again, with the spot you stopped at and the path from there out.
+  - `finished` — the map with the whole solution path.
+  The original's `s`/`f` transition animations are folded into `started`'s fog-in and DOM
+  overlays; there is no separate white-out finish state.
+- The **entrance cell `[1][0]`** is opened only during the `started` render pass (so the portal
+  walk treats it as a passage) and restored after, so the entrance isn't itself a mirror —
   matching the C.
 
 ## Lighting (`shaders.js`)
@@ -179,8 +214,8 @@ view each frame) + a positional **spotlight at the camera** aimed down −Z (cut
 exponent 40, linear attenuation) that gives the dim corridors their flashlight look.
 **Radial** linear fog (by distance from the eye, not forward depth, so it dissolves the far
 walls evenly in every direction and stays synced to the radial section cull — dark tint in
-play, ramps in on entry, white-out on finish). Two-sided shading (`N` flipped toward the
-viewer) because reflected/inside-out faces are common.
+play, ramps in on entry; the overview/review maps are flat full-bright with no fog). Two-sided
+shading (`N` flipped toward the viewer) because reflected/inside-out faces are common.
 
 ## How the port diverges from the C (all intentional)
 
@@ -193,8 +228,12 @@ viewer) because reflected/inside-out faces are common.
   recursed on `walls^depth` with only a depth cap). `GL_MODULATE` lighting is re-implemented
   in the single shader; `glClipPlane` is no longer needed (each section is a finite cell,
   masked by the stencil rather than clip planes).
-- UI became **mobile-first on-screen controls** (joystick + buttons + menu) instead of the
-  keyboard/right-mouse-look-only desktop build.
+- UI became **mobile-first on-screen controls** (joysticks + buttons + menu) instead of the
+  keyboard/right-mouse-look-only desktop build, and grew a real **user journey**: a five-state
+  machine with size presets (the only exposed generation knob — `p`/`q` are locked at the
+  best-playing 0.9/0.1), a readable top-down map for the non-play states, full session
+  persistence (seeded maze), and a **hint** system (collectible gems → a temporary, flowing,
+  fog-dimmed reveal of the way out).
 
 ## Invariants to preserve
 
