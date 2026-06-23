@@ -88,7 +88,12 @@ function portalInterval(fwdAng, ex, ez, e1, e2) {
 
 // Unfold the maze around the camera.
 //
-// params: { maze, camX, camZ, yaw, viewDist, fovy, aspect, margin?, maxSections? }
+// params: { maze, camX, camZ, yaw, viewDist, fovy, aspect,
+//           eyeX?, eyeZ?, pitch?, margin?, minHalf?, maxSections? }
+//   eyeX/eyeZ default to camX/camZ; the walk starts from (and the sector is measured at)
+//   the eye, which sits a touch ahead of the body. pitch widens the sector when looking
+//   up/down. minHalf forces a wider initial half-sector than the FOV implies (the game
+//   passes π/2 — a 180° forward hemisphere; see below).
 // returns:
 //   visits — every side considered, in depth-first order, each with kind
 //     ('start'|'opening'|'wall'), drawn flag, cull reason (null|'angle'|
