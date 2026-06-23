@@ -220,6 +220,15 @@ html, body {
 }
 .primary-btn:active { transform: scale(0.96); }
 
+/* Consistent press feedback (slight shrink) across every button. */
+.ghost-btn, .top-btn, #menu-button, .preset, .menu-head button {
+  transition: transform 0.05s, background 0.15s, box-shadow 0.15s;
+}
+.ghost-btn:active, .top-btn:active, #menu-button:active,
+.preset:active, .menu-head button:active { transform: scale(0.96); }
+/* btn-restart is also a .primary-btn but stays centred while pressed. */
+#btn-restart:active { transform: translateX(-50%) scale(0.96); }
+
 .ghost-btn {
   padding: 13px 20px;
   font-size: 15px;

@@ -158,7 +158,7 @@ async function main() {
       ['initial', () => window.__app.toInitial()],
       ['generated', () => window.__app.newGame(12)],
       ['started', () => { const a = window.__app; a.startGame(); a.animT = 1; }],
-      ['reveal', () => { const a = window.__app; a.revealUntil = Date.now() + 5000; a._dropReveal(); }],
+      ['reveal', () => { const a = window.__app; const h = a.hints[0]; if (h) { a.camX = h.j + 0.5; a.camZ = h.i + 0.5; a._parseMove(); } }],
       ['surrendered', () => window.__app.surrender()],
       ['finished', () => { const a = window.__app; a.newGame(8); a.startGame(); a._finish(); }],
     ]) {

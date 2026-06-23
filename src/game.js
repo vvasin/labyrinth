@@ -108,8 +108,7 @@ export class App {
     // Hint / reveal state.
     this.hints = [];           // [{ i, j, used }]
     this.revealUntil = 0;      // epoch ms; an active path reveal ends at this time
-    this._revealKey = null;    // cell the current reveal ribbon was built from
-    this.revealMesh = null;
+    this.revealMesh = null;    // built once per pickup (see _buildRevealRibbon)
     this.reviewPathMesh = null; // path drawn on the surrendered/finished maps
     this.surrenderAt = null;    // { x, z } world position the player gave up at
 
@@ -161,6 +160,8 @@ export class App {
         this.camX = c.x ?? 1.5; this.camY = c.y ?? 0.5; this.camZ = c.z ?? 1.5;
         this.yaw = c.yaw ?? 90; this.pitch = c.pitch ?? 0;
         this.animT = 1; // skip the fog-in on resume
+        // Rebuild a still-running reveal from the resumed cell.
+        if (this.revealUntil > Date.now()) this._buildRevealRibbon(this.camZ | 0, this.camX | 0);
       } else if (this.state === STATE.SURRENDERED) {
         this._buildReview(this.surrenderAt);
         this._frameOverview();
@@ -277,9 +278,15 @@ export class App {
   // --- review (surrendered / finished) maps ------------------------------
   _buildReview(from) {
     const mz = this.maze;
-    const cells = from
-      ? mz.pathFrom(Math.floor(from.z), Math.floor(from.x))
-      : mz.solutionPath();
+    let cells;
+    if (from) {
+      cells = mz.pathFrom(Math.floor(from.z), Math.floor(from.x));
+    } else {
+      // Finished: draw the full solution and extend it back to the entrance
+      // border cell (1,0), where the start marker sits, so the line begins at
+      // the marker rather than one cell in.
+      cells = [{ x: 1, y: 0 }, ...mz.solutionPath()];
+    }
     this._dropReview();
     this.reviewPathMesh = this.r.createMesh(buildPathLine(cells));
     // Where to plant the "you" marker: the surrender spot, or the exit on a win.
@@ -294,7 +301,6 @@ export class App {
 
   _dropReveal() {
     if (this.revealMesh) { this.r.gl.deleteBuffer(this.revealMesh.buf); this.revealMesh = null; }
-    this._revealKey = null;
   }
 
   // --- persistence --------------------------------------------------------
@@ -341,9 +347,18 @@ export class App {
       if (h.used || h.i !== iz || h.j !== ix) continue;
       h.used = true;
       this.revealUntil = Date.now() + REVEAL_MS;
-      this._dropReveal();          // force a rebuild from the current cell
+      this._buildRevealRibbon(iz, ix);
       this._save();
     }
+  }
+
+  // Build the reveal ribbon once, from the given cell to the exit. It is NOT
+  // rebuilt as the player walks (that reset the arc-length parametrisation each
+  // cell crossing, twitching the flowing pulse); the static ribbon's pulse keeps
+  // animating smoothly off uTime instead.
+  _buildRevealRibbon(ci, cj) {
+    this._dropReveal();
+    this.revealMesh = this.r.createMesh(buildPathRibbon(this.maze.pathFrom(ci, cj)));
   }
 
   look(dx, dy) {
@@ -613,15 +628,8 @@ export class App {
 
   _drawReveal() {
     if (Date.now() >= this.revealUntil) { if (this.revealMesh) this._dropReveal(); return; }
-    const r = this.r, mz = this.maze;
-    const ci = this.camZ | 0, cj = this.camX | 0;
-    const key = ci * 100000 + cj;
-    if (key !== this._revealKey || !this.revealMesh) {
-      if (this.revealMesh) r.gl.deleteBuffer(this.revealMesh.buf);
-      this.revealMesh = r.createMesh(buildPathRibbon(mz.pathFrom(ci, cj)));
-      this._revealKey = key;
-    }
-    if (!this.revealMesh.count) return;
+    const r = this.r;
+    if (!this.revealMesh || !this.revealMesh.count) return;
     r.enableCull(false);
     r.depthMask(false);
     r.setMatrices(this._proj, this._view);
